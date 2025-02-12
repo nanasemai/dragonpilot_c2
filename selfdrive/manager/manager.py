@@ -53,10 +53,9 @@ def manager_init() -> None:
     ("DisableUpdates", "1"),
     ("dp_no_gps_ctrl", "0"),
     ("dp_no_fan_ctrl", "0"),
-    ("dp_logging", "1"),
+    ("dp_logging", "0"),
     ("dp_0813", "1"),
     ("dp_lat_controller", "0"),
-
     # dp addition
     ("dp_alka", "0"),
     ("dp_mapd", "0"),
