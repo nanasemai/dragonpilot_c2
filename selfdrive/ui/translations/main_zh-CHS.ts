@@ -24,15 +24,15 @@
     </message>
     <message>
         <source>ECO</source>
-        <translation>ECO</translation>
+        <translation>经济</translation>
     </message>
     <message>
         <source>NOR</source>
-        <translation>NOR</translation>
+        <translation>标准</translation>
     </message>
     <message>
         <source>SPT</source>
-        <translation>SPT</translation>
+        <translation>运动</translation>
     </message>
 </context>
 <context>
@@ -154,14 +154,14 @@
     </message>
     <message>
         <source>Dashcam Mode Removal</source>
-        <translation>Dashcam Mode移除</translation>
+        <translation>绕过行车记录仪模式</translation>
     </message>
     <message>
         <source>If you see &apos;Dashcam Mode&apos; while onroad, enable this will force enable openpilot control.
 Dashcam Mode usually means your vehicle is not fully supported.
 USE AT YOUR OWN RISK!
 Reboot required.</source>
-        <translation>如果您在路上看到“Dashcam Mode”，请启用该选项，这将强制启用 openpilot 控制。
+        <translation>如果您在路上看到“行车记录仪模式”，请启用该选项，这将强制启用 openpilot 控制。
 行车记录仪模式通常意味着您的车辆未得到完全支持。
 使用风险自负！
 需要重新启动。</translation>
@@ -177,7 +177,7 @@ Reboot required.</source>
     <message>
         <source>When enabled, openpilot lateral Control will be always on when ACC MAIN is ON.
 Reboot required.</source>
-        <translation>启用后，当 ACC 系统开关开启时，dragonpilot 的横向控制将始终保持开启状态。
+        <translation>启用后，当 ACC 系统开关开启时，openpilot 的横向控制将始终保持开启状态。
 需要重新启动。</translation>
     </message>
     <message>
@@ -186,7 +186,7 @@ Reboot required.</source>
     </message>
     <message>
         <source>When enabled, openpilot will use lane lines for lateral control, fallback to laneless mode automatically when lane lines probabilities are low.</source>
-        <translation>当启用时，dragonpilot 将使用车道线进行横向控制，在车道线概率较低时自动切换至无车道线模式。</translation>
+        <translation>当启用时，openpilot将使用车道线进行横向控制，在车道线概率较低时自动切换至无车道线模式。</translation>
     </message>
     <message>
         <source>Lane Change Assist Activate Speed</source>
@@ -198,11 +198,11 @@ Off = Disable lane change assistance.
 1 mph = 1.6 kph</source>
         <translation>调整车道变换辅助激活速度。
 关闭 = 禁用车道变换辅助。
-1 英里/小时 = 1.6 公里/小时</translation>
+1 英里/时 = 1.6 公里/时</translation>
     </message>
     <message>
         <source> mph</source>
-        <translation> 英里/时</translation>
+        <translation> 英里每小时</translation>
     </message>
     <message>
         <source>Off</source>
@@ -215,7 +215,7 @@ Off = Disable lane change assistance.
     <message>
         <source>All Speed - Use Lane Line when available.
 *Number* - Use Lane Line when available and drive speed is above the *number*.</source>
-        <translation>All Speed - 如果有车道线就使用车道线。
+        <translation>全速 - 如果有车道线就使用车道线。
 *数值* - 如果有车道线且车速高于这个数值，则使用车道线。</translation>
     </message>
     <message>
@@ -270,16 +270,16 @@ Reboot required.</source>
         <source>When enabled, it will apply an offset to get_stopped_equivalence_factor in longitudinal MPC resulting in an early demand for acceleration.
 Credit to krkeegen: https://github.com/krkeegan/</source>
         <translation>启用后，它将在纵向 MPC 中对 get_stopped_equivalence_factor 应用偏移，从而产生对加速的早期需求.
-Credit to krkeegen: https://github.com/krkeegan/</translation>
+感谢krkeegen: https://github.com/krkeegan/</translation>
     </message>
     <message>
         <source>Enable Dynamic End-to-End Longitudinal Control</source>
-        <translation>启用动态端到端纵向控制</translation>
+        <translation>启用动态端到端(End-to-End)纵向控制</translation>
     </message>
     <message>
         <source>When enabled, openpilot will dynamically change between End-to-End or ACC mode.
 Your vehicle must support openpilot longitudinal control.</source>
-        <translation>启用后，openpilot 将在端到端或 ACC 模式之间动态切换。
+        <translation>启用后，openpilot 将在端到端(End-to-End)或 ACC 模式之间动态切换。
 您的车辆必须支持 openpilot 纵向控制。</translation>
     </message>
     <message>
@@ -371,7 +371,7 @@ Reboot required.</source>
     <message>
         <source>When enabled, openpilot will disable IR completely.
 Reboot required.</source>
-        <translation>启用时，dragonpilot 将完全禁用红外线。
+        <translation>启用时，openpilot 将完全禁用红外线。
 需要重新启动。</translation>
     </message>
     <message>
@@ -381,7 +381,7 @@ Reboot required.</source>
     <message>
         <source>When enabled, openpilot will shutdown the device automatically.
 Reboot required.</source>
-        <translation>启用后，dragonpilot 将会自动关闭设备。
+        <translation>启用后，openpilot 将会自动关闭设备。
 需要重新启动。</translation>
     </message>
     <message>
@@ -436,7 +436,7 @@ Off - Does not emit any sound at all.</source>
         <source>When enabled, openpilot will stop sending standstill signal when the car is fully stopped.
 ONLY WORK ON SOME VEHICLES.
 Reboot Required.</source>
-        <translation>启用后，当车辆完全停止时，dragonpilot 将停止发送停止信号。
+        <translation>启用后，当车辆完全停止时，openpilot 将停止发送停止信号。
 仅适用于部分车辆。
 需要重新启动。</translation>
     </message>
@@ -461,7 +461,7 @@ Reboot Required.</source>
     <message>
         <source>When enabled, openpilot will attempt to lock the doors when drive above 10 km/h (6.2 mph).
 Reboot Required.</source>
-        <translation>启用后，当速度超过 10 km/h（6.2 mph）时，dragonpilot 将尝试锁定车门。
+        <translation>启用后，当速度超过 10 km/h（6.2 mph）时，openpilot 将尝试锁定车门。
 需要重新启动。</translation>
     </message>
     <message>
@@ -471,7 +471,7 @@ Reboot Required.</source>
     <message>
         <source>When enabled, openpilot will attempt to unlock the doors when shift to gear P.
 Reboot Required.</source>
-        <translation>启用后，当换档至 P 档时，dragonpilot 将尝试解锁车门。
+        <translation>启用后，当换档至 P 档时，openpilot 将尝试解锁车门。
 需要重新启动。</translation>
     </message>
     <message>
@@ -565,6 +565,10 @@ OP - 当 OP 功能启用时，显示将关闭（不包括警示）。
 需要重新启动。</translation>
     </message>
     <message>
+        <source>Lead Vehicle Warning</source>
+        <translation>前车消失预警</translation>
+    </message>
+    <message>
         <source>*α* Lead Vehicle Warning</source>
         <translation>前车消失预警</translation>
     </message>
@@ -612,6 +616,10 @@ Reboot required.</source>
         <translation>启用后，您将能够通过端口9000使用浏览器访问日志数据。
 需要在同一网络上。（例如LAN）
 需要重新启动。</translation>
+    </message>
+    <message>
+        <source>Enable Otisserv</source>
+        <translation>开启Otisserv服务</translation>
     </message>
     <message>
         <source>*α* Enable Otisserv</source>
@@ -677,11 +685,11 @@ through drangonpilot.org.</source>
     </message>
     <message>
         <source>Error displaying tmux output.</source>
-        <translation>显示 tmux 输出时出错。</translation>
+        <translation>显示tmux输出时出错。</translation>
     </message>
     <message>
         <source>Dongle ID</source>
-        <translation>设备ID（Dongle ID）</translation>
+        <translation>设备ID</translation>
     </message>
     <message>
         <source>N/A</source>
