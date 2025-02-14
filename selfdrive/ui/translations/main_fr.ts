@@ -17,6 +17,25 @@
     </message>
 </context>
 <context>
+    <name>AccelButton</name>
+    <message>
+        <source>OP</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ECO</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>NOR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SPT</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>AdvancedNetworking</name>
     <message>
         <source>Back</source>
@@ -91,6 +110,32 @@
     </message>
 </context>
 <context>
+    <name>C2NetworkPanel</name>
+    <message>
+        <source>Wi-Fi Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OPEN</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tethering Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>IP Address</source>
+        <translation type="unfinished">Adresse IP</translation>
+    </message>
+</context>
+<context>
+    <name>CarSelectionPanel</name>
+    <message>
+        <source>[AUTO SELECT]</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ConfirmationDialog</name>
     <message>
         <source>Ok</source>
@@ -99,6 +144,396 @@
     <message>
         <source>Cancel</source>
         <translation>Annuler</translation>
+    </message>
+</context>
+<context>
+    <name>DPCtrlPanel</name>
+    <message>
+        <source>Ctrl - Overall</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dashcam Mode Removal</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>If you see &apos;Dashcam Mode&apos; while onroad, enable this will force enable openpilot control.
+Dashcam Mode usually means your vehicle is not fully supported.
+USE AT YOUR OWN RISK!
+Reboot required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ctrl - Lateral</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable ALKA</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot lateral Control will be always on when ACC MAIN is ON.
+Reboot required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Lane Priority Mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will use lane lines for lateral control, fallback to laneless mode automatically when lane lines probabilities are low.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Lane Change Assist Activate Speed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Adjust the lane change assist activate speed.
+Off = Disable lane change assistance.
+1 mph = 1.6 kph</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> mph</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Only When Drive Above</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All Speed - Use Lane Line when available.
+*Number* - Use Lane Line when available and drive speed is above the *number*.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> kph</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All Speed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DEFAULT</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>INDI</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>LQR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Lateral Controller</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change your lateral controller.
+USE AT YOUR OWN RISK!
+Reboot required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ctrl - Longitudinal</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Dynamic Following</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will dynamically adjust following distance based on your &quot;Driving Personality&quot; setting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable krkeegan Tune (SNG Boost)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, it will apply an offset to get_stopped_equivalence_factor in longitudinal MPC resulting in an early demand for acceleration.
+Credit to krkeegen: https://github.com/krkeegan/</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Dynamic End-to-End Longitudinal Control</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will dynamically change between End-to-End or ACC mode.
+Your vehicle must support openpilot longitudinal control.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Turn Speed Control - Vision</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will use path predictions from camera vision to estimate the appropriate speed to drive through turns ahead.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable MapD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will display current road name and speed limit on the screen.
+Note: YOUR DRIVING ROUTE DATA WILL BE UPLOADED to openstreetmap server to help to improve map accuracy.
+Reboot required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>On-Screen Personality Button</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will display an on-screen personality button.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>On-Screen Accel Button</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will display an on-screen accel profile button.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OP</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ECO</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>NOR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SPT</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Acceleration Profile</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OP - Stock tune.
+ECO - Eco tune.
+NOR - Normal tune.
+SPT - Sport tune.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Device</source>
+        <translation type="unfinished">Appareil</translation>
+    </message>
+    <message>
+        <source>Disable Temp Check</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will disable device temperature check.
+**NOTED** An overheated device may result in random shutdowns or lag.
+Reboot required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Disable IR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will disable IR completely.
+Reboot required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Auto Shutdown</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will shutdown the device automatically.
+Reboot required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Standard</source>
+        <translation type="unfinished">Standard</translation>
+    </message>
+    <message>
+        <source>Warning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audible Alert Mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Standard - Standard behaviour.
+Warning - Only emits sound when there is a warning.
+Off - Does not emit any sound at all.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Auto Shutdown In</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Adjust your shutdown waiting period.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> mins</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Immediately</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Miscellaneous</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Toyota / Lexus</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Stop and Go (SnG) Hack</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will stop sending standstill signal when the car is fully stopped.
+ONLY WORK ON SOME VEHICLES.
+Reboot Required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Enhanced BSM</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will use debugging CAN messages to receive unfiltered BSM signals, allowing detection of more objects.
+Tested on Prius TSS2 and RAV4 TSS1.
+ONLY WORK ON SOME VEHICLES.
+Reboot Required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Door Auto Locking</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will attempt to lock the doors when drive above 10 km/h (6.2 mph).
+Reboot Required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Door Auto Unlocking</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will attempt to unlock the doors when shift to gear P.
+Reboot Required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Zorro-Steering-Sensor (ZSS) Support</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will use sensor outputs from ZSS for more accurate steering control.
+DO NOT ENABLE unless you have ZSS installed.
+Reboot Required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hyundai / Kia / Genesis</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Minimum Steer Speed Bypass</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will control the steering to 0 kph/mph.
+MDPS harness may required.
+Reboot Required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>VW / Skoda / Audi</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Lateral Control Timebomb Bypass</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot temporary disable lateral control when it reaches timebomb limit.
+ At 5 mins 40 secs - Warning.
+ At 5 mins 45 secs - Disable lateral control.
+At 5 mins 48 secs - Resume lateral control.
+Reboot Required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset Configuration</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RESET</source>
+        <translation type="unfinished">RÉINITIALISER</translation>
+    </message>
+    <message>
+        <source>Are you sure you want to reset all dp configurations?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset</source>
+        <translation type="unfinished">Réinitialiser</translation>
+    </message>
+    <message>
+        <source>Lead Vehicle Warning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will warn driver when a lead vehicle gone missing over 2 secs while driving above 70 km/h.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable On-Road Dashcam</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable this if you wish to record screen, just like a dashcam.
+Reboot required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Display Flight Panel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will show information such as pitch angle, altitude, compass on the driving screen.
+GPS required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Display Tesla-style Rainbow Path</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot driving path will be replaced with rainbow path and color will change based on the speed.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -272,6 +707,22 @@
     <message>
         <source>Disengage to Power Off</source>
         <translation>Désengager pour éteindre</translation>
+    </message>
+    <message>
+        <source>Debug Console</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Error displaying tmux output.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Adjust System Sound Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ADJUST</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -514,6 +965,21 @@
     </message>
 </context>
 <context>
+    <name>PersonalityButton</name>
+    <message>
+        <source>Aggressive</source>
+        <translation type="unfinished">Aggressif</translation>
+    </message>
+    <message>
+        <source>Standard</source>
+        <translation type="unfinished">Standard</translation>
+    </message>
+    <message>
+        <source>Relaxed</source>
+        <translation type="unfinished">Détendu</translation>
+    </message>
+</context>
+<context>
     <name>PrimeAdWidget</name>
     <message>
         <source>Upgrade Now</source>
@@ -656,7 +1122,7 @@ Cela peut prendre jusqu&apos;à une minute.</translation>
     <name>SettingsWindow</name>
     <message>
         <source>×</source>
-        <translation>×</translation>
+        <translation type="vanished">×</translation>
     </message>
     <message>
         <source>Device</source>
@@ -673,6 +1139,18 @@ Cela peut prendre jusqu&apos;à une minute.</translation>
     <message>
         <source>Software</source>
         <translation>Logiciel</translation>
+    </message>
+    <message>
+        <source>HOME</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Vehicle Model:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>[AUTO SELECT]</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -1129,6 +1607,34 @@ Cela peut prendre jusqu&apos;à une minute.</translation>
     <message>
         <source>Enable the openpilot longitudinal control (alpha) toggle to allow Experimental mode.</source>
         <translation>Activer le contrôle longitudinal d&apos;openpilot (en alpha) pour autoriser le mode expérimental.</translation>
+    </message>
+    <message>
+        <source>Use 0.8.13.1 Driving Model</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will use the good old driving model from 0.8.13.1.
+For safety reason, vision only openpilot longitudinal will be disabled.
+Reboot required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Logging</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will log your car stats as well as all the camera footages.
+Logging with the 0.8.16 model may have performance issues, so do not use both features at the same time unless you know what you are doing.
+Reboot required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Right-Hand Drive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow openpilot to obey left-hand traffic conventions and perform driver monitoring on right driver seat.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

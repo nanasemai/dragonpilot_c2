@@ -630,6 +630,16 @@ Reboot required.</source>
 through drangonpilot.org.</source>
         <translation>启用后，您将能够通过drangonpilot.org远程访问某些功能。</translation>
     </message>
+    <message>
+        <source>Enable On-Road Dashcam</source>
+        <translation>启用行车记录仪功能</translation>
+    </message>
+    <message>
+        <source>Enable this if you wish to record screen, just like a dashcam.
+Reboot required.</source>
+        <translation>如果你想像行车记录仪一样录制屏幕，请启用此功能。
+需要重新启动。</translation>
+    </message>
 </context>
 <context>
     <name>DeclinePage</name>
@@ -1338,7 +1348,7 @@ This may take up to a minute.</source>
     <name>Sidebar</name>
     <message>
         <source>CONNECT</source>
-        <translation>CONNECT</translation>
+        <translation>连接</translation>
     </message>
     <message>
         <source>OFFLINE</source>
@@ -1354,7 +1364,7 @@ This may take up to a minute.</source>
     </message>
     <message>
         <source>TEMP</source>
-        <translation>设备温度</translation>
+        <translation>温度</translation>
     </message>
     <message>
         <source>HIGH</source>
