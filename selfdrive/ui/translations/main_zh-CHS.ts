@@ -198,19 +198,19 @@ Reboot required.</source>
     </message>
     <message>
         <source>Lane Change Assist Activate Speed</source>
-        <translation>辅助车道变换速度设定</translation>
+        <translation>车道变换辅助激活速度</translation>
     </message>
     <message>
         <source>Adjust the lane change assist activate speed.
 Off = Disable lane change assistance.
 1 mph = 1.6 kph</source>
-        <translation>调整辅助车道变换激活速度。
+        <translation>调整车道变换辅助激活速度。
 关闭 = 禁用车道变换辅助。
 1 英里/时 = 1.6 公里/时</translation>
     </message>
     <message>
         <source> mph</source>
-        <translation> 英里/时</translation>
+        <translation> 英里每小时</translation>
     </message>
     <message>
         <source>Off</source>
@@ -218,7 +218,7 @@ Off = Disable lane change assistance.
     </message>
     <message>
         <source>Only When Drive Above</source>
-        <translation>车道线优先模式启用速度</translation>
+        <translation>仅当车辆行驶速度高于</translation>
     </message>
     <message>
         <source>All Speed - Use Lane Line when available.
