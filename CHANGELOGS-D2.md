@@ -1,3 +1,7 @@
+2025-02-15
+========================
+* Updated CHS translation
+
 2025-02-12
 ========================
 * Updated CHS translations

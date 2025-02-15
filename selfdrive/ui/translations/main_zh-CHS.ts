@@ -188,21 +188,29 @@ Reboot required.</source>
         <source>When enabled, openpilot will use lane lines for lateral control, fallback to laneless mode automatically when lane lines probabilities are low.</source>
         <translation>当启用时，openpilot将使用车道线进行横向控制，在车道线概率较低时自动切换至无车道线模式。</translation>
     </message>
+     <message>
+        <source>ALC RoadEdge Detection</source>
+        <translation>启用道路边缘检测</translation>
+    </message>
+    <message>
+        <source>Enabling this will prevent lane change when you are too close to road edge.</source>
+        <translation>启用此功能将防止在离道路边缘太近时变道。</translation>
+    </message>
     <message>
         <source>Lane Change Assist Activate Speed</source>
-        <translation>车道变换辅助激活速度</translation>
+        <translation>辅助车道变换速度设定</translation>
     </message>
     <message>
         <source>Adjust the lane change assist activate speed.
 Off = Disable lane change assistance.
 1 mph = 1.6 kph</source>
-        <translation>调整车道变换辅助激活速度。
+        <translation>调整辅助车道变换激活速度。
 关闭 = 禁用车道变换辅助。
 1 英里/时 = 1.6 公里/时</translation>
     </message>
     <message>
         <source> mph</source>
-        <translation> 英里每小时</translation>
+        <translation> 英里/时</translation>
     </message>
     <message>
         <source>Off</source>
@@ -210,7 +218,7 @@ Off = Disable lane change assistance.
     </message>
     <message>
         <source>Only When Drive Above</source>
-        <translation>仅当车辆行驶速度高于</translation>
+        <translation>车道线优先模式启用速度</translation>
     </message>
     <message>
         <source>All Speed - Use Lane Line when available.
