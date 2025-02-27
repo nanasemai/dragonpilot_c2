@@ -134,3 +134,12 @@ def ffplay_mp4_wrap_process_builder(file_name):
   return subprocess.Popen(
     command_line, stdout=subprocess.PIPE
   )
+
+def listdir_by_creation(d: str) -> List[str]:
+  try:
+    paths = os.listdir(d)
+    paths = sorted(paths, key=get_directory_sort)
+    return paths
+  except OSError:
+    cloudlog.exception("listdir_by_creation failed")
+    return list()
