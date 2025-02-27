@@ -6,7 +6,6 @@ from pathlib import Path
 from flask import render_template, request, session
 from openpilot.system.hardware import PC
 from openpilot.system.hardware.hw import Paths
-from openpilot.system.loggerd.uploader import listdir_by_creation
 
 from tools.lib.route import SegmentName
 
@@ -34,7 +33,7 @@ def login_required(f):
 
 
 def list_files(path, single=False):
-  files = os.listdir(path) if single else listdir_by_creation(path)
+  files = os.listdir(path)
   return sorted(files, reverse=True)
 
 
