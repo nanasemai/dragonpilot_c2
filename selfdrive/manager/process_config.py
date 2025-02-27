@@ -102,7 +102,7 @@ procs = [
   # PythonProcess("gpx_uploader", "selfdrive.dragonpilot.gpx_uploader", offroad=True),
   NativeProcess("otisserv", "selfdrive/dragonpilot", ['./otisserv'], only_offroad),
   #NativeProcess("fileserv", "selfdrive/dragonpilot", ['./fileserv'], only_offroad),
-  PythonProcess("fleet_manager", "system.fleetmanager.fleet_manager", only_offroad, enabled=not PC),
+  PythonProcess("fleet_manager", "system.fleetmanager.fleet_manager", only_offroad),
 ]
 
 managed_processes = {p.name: p for p in procs}
