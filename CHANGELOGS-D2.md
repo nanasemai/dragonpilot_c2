@@ -1,3 +1,8 @@
+2025-02-27
+========================
+* Fleet manager
+* GPX Log
+
 2025-02-15
 ========================
 * Updated CHS translation

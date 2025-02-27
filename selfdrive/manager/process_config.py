@@ -82,7 +82,7 @@ procs = [
   PythonProcess("thermald", "selfdrive.thermald.thermald", always_run),
   PythonProcess("tombstoned", "selfdrive.tombstoned", always_run, enabled=not PC),
   PythonProcess("updated", "selfdrive.updated", only_offroad, enabled=not PC),
-  PythonProcess("uploader", "selfdrive.loggerd.uploader", only_offroad),
+  # PythonProcess("uploader", "selfdrive.loggerd.uploader", only_offroad),
   # PythonProcess("statsd", "selfdrive.statsd", offroad=True),
 
   # debug procs
@@ -98,10 +98,11 @@ procs = [
   # mapd
   PythonProcess("mapd", "selfdrive.mapd.mapd", only_onroad),
   # gpxd
-  # PythonProcess("gpxd", "selfdrive.dragonpilot.gpxd"),
+  PythonProcess("gpxd", "selfdrive.dragonpilot.gpxd",only_onroad),
   # PythonProcess("gpx_uploader", "selfdrive.dragonpilot.gpx_uploader", offroad=True),
   NativeProcess("otisserv", "selfdrive/dragonpilot", ['./otisserv'], only_offroad),
-  NativeProcess("fileserv", "selfdrive/dragonpilot", ['./fileserv'], only_offroad),
+  #NativeProcess("fileserv", "selfdrive/dragonpilot", ['./fileserv'], only_offroad),
+  PythonProcess("fleet_manager", "system.fleetmanager.fleet_manager", always_run, enabled=not PC),
 ]
 
 managed_processes = {p.name: p for p in procs}

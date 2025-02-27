@@ -99,7 +99,7 @@ class GpxD():
     if len(self.logs) > 1:
       if not os.path.exists(GPX_LOG_PATH):
         os.makedirs(GPX_LOG_PATH)
-      filename = f"{self.started_time.replace(':', '-')}.gpx"
+      filename = f"{datetime.datetime.now().isoformat().replace(':', '-').replace('T','--').replace('.','--')}.gpx"
       lines = [
         '<?xml version="1.0" encoding="utf-8" standalone="yes"?>',
         '<gpx version="1.1" creator="dragonpilot https://github.com/dragonpilot-community/dragonpilot" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">',

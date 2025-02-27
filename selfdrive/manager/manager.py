@@ -186,7 +186,7 @@ def manager_thread() -> None:
     ignore += ["ubloxd", "gpx_uploader", "gpxd", "mapd"]
 
   if not params.get_bool("dp_fileserv"):
-    ignore += ["fileserv"]
+    ignore += ["fleet_manager"]
 
   if not params.get_bool("dp_otisserv"):
     ignore += ["otisserv"]
