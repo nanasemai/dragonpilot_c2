@@ -2,11 +2,11 @@ import os
 import subprocess
 from functools import wraps
 from pathlib import Path
-
+from typing import List
 from flask import render_template, request, session
 from openpilot.system.hardware import PC
 from openpilot.system.hardware.hw import Paths
-
+from openpilot.system.swaglog import cloudlog
 from tools.lib.route import SegmentName
 
 # path to sunnypilot screen recordings and error logs
@@ -143,3 +143,6 @@ def listdir_by_creation(d: str) -> List[str]:
   except OSError:
     cloudlog.exception("listdir_by_creation failed")
     return list()
+
+def get_directory_sort(d: str) -> List[str]:
+  return [s.rjust(10, '0') for s in d.rsplit('--', 1)]
