@@ -10,7 +10,7 @@ from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.controls.lib.pid import PIDController
 from openpilot.selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
-from openpilot.selfdrive.legacy_modeld.constants import ModelConstants
+from openpilot.selfdrive.hybrid_modeld.constants import ModelConstants
 from openpilot.common.swaglog import cloudlog
 
 # At higher speeds (25+mph) we can assume:
