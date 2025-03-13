@@ -1,0 +1,16 @@
+{% extends "layout.html" %}
+
+{% block title %}
+    GPX文件
+{% endblock %}
+
+{% block main %}
+    <br>
+    <h1>GPX文件<br>{{ file_name }}</h1>
+    <br>
+{% endblock %}
+
+{% block unformated %}
+    <pre style="font-size: x-small; margin: 20px;">{{ file_content }}</pre>
+    <br><br>
+{% endblock %}

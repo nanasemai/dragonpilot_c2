@@ -1,0 +1,56 @@
+{% extends "layout.html" %}
+
+{% block title %}
+    C2日志
+{% endblock %}
+
+{% block main %}
+    <br>
+    <h1>C2日志</h1>
+    {% if current_path %}
+        <h5>当前路径: {{ current_path }}</h5>
+    {% endif %}
+    <br>
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead class="table-light">
+                <tr>
+                    <th>名称</th>
+                    <th>类型</th>
+                    <th>修改时间</th>
+                    <th>大小</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if current_path %}
+                    <tr>
+                        <td><a href="../">..</a></td>
+                        <td>目录</td>
+                        <td></td>
+                        <td></td>
+                    </tr>
+                {% endif %}
+                {% for row in rows %}
+                    <tr>
+                        <td>
+                            <a href="{{ row.path }}">
+                                {% if row.type == 'directory' %}📁{% else %}📄{% endif %}
+                                {{ row.name }}
+                            </a>
+                        </td>
+                        <td>{{ '目录' if row.type == 'directory' else '文件' }}</td>
+                        <td>{{ row.mtime }}</td>
+                        <td>{{ row.size }}</td>
+                        <td>
+                            {% if row.type != 'directory' %}
+                            <div class="btn-group" role="group">
+                                <a href="/download/c2_logs/{{ row.path }}" class="btn btn-sm btn-outline-success">下载</a>
+                            </div>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}

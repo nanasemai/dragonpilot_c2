@@ -23,8 +23,10 @@
 
 import os
 import time
+from pathlib import Path
 from openpilot.common.params import Params
 from openpilot.system.version import get_version, get_branch
+from openpilot.common.swaglog import cloudlog
 # from openpilot.common.realtime import set_core_affinity, set_realtime_priority
 
 # for uploader
@@ -56,47 +58,35 @@ def _debug(msg):
 
 class GpxUploader():
   def __init__(self):
-    self._delete_after_upload = True #not Params().get_bool('dp_gpxd')
-    # self._car_model = "Unknown Vehicle"
+    self._delete_after_upload = True
     self._version = get_version()
     self._branch = get_branch()
+    # 设置日志模块名称
+    cloudlog.bind_global(module='gpx_uploader')
+    cloudlog.debug("初始化 GpxUploader")
+    # 确保日志和视频目录存在
+    Path(GPX_LOG_PATH).mkdir(parents=True, exist_ok=True)
 
   def _identify_vehicle(self):
-    # read model from LiveParameters
-    # params = Params().get("LiveParameters")
-    # if params is not None:
-    #   params = json.loads(params)
-    #   self._car_model = params.get('carFingerprint', self._car_model)
-    _debug("GpxUploader init - _delete_after_upload = %s" % self._delete_after_upload)
-    # _debug("GpxUploader init - _car_model = %s" % self._car_model)
+    cloudlog.debug(f"GpxUploader初始化 - _delete_after_upload = {self._delete_after_upload}")
 
   def _is_online(self):
     try:
       r = requests.get(VERSION_URL, headers=API_HEADER)
-      _debug("is_online? status_code = %s" % r.status_code)
+      cloudlog.debug(f"检查在线状态: {r.status_code}")
       return r.status_code >= 200
-    except Exception:
+    except Exception as e:
+      cloudlog.error(f"检查在线状态失败: {str(e)}")
       return False
 
   def _get_is_uploaded(self, filename):
     result = getxattr(filename, UPLOAD_ATTR_NAME) is not None
-    _debug("%s is uploaded: %s" % (filename, result))
+    cloudlog.debug(f"文件 {filename} 上传状态: {result}")
     return result
 
   def _set_is_uploaded(self, filename):
-    _debug("%s set to uploaded" % filename)
+    cloudlog.debug(f"标记文件已上传: {filename}")
     setxattr(filename, UPLOAD_ATTR_NAME, UPLOAD_ATTR_VALUE)
-
-  def _get_files(self):
-    return sorted( filter( os.path.isfile, glob.glob(LOG_PATH + '*') ) )
-
-  def _get_files_to_be_uploaded(self):
-    files = self._get_files()
-    files_to_be_uploaded = []
-    for file in files:
-      if not self._get_is_uploaded(file):
-        files_to_be_uploaded.append(file)
-    return files_to_be_uploaded
 
   def _do_upload(self, filename):
     fn = os.path.basename(filename)
@@ -109,14 +99,13 @@ class GpxUploader():
     }
     try:
       r = requests.post(UPLOAD_URL, files=files, data=data, headers=API_HEADER)
-      _debug("do_upload - %s - %s" % (filename, r.status_code))
+      cloudlog.debug(f"上传文件 {filename} - 状态码: {r.status_code}")
       return r.status_code == 200
-    except Exception:
+    except Exception as e:
+      cloudlog.error(f"上传文件失败 {filename}: {str(e)}")
       return False
 
   def run(self):
-    # give it few seconds before we start running the process
-    # only identify vehicle once
     time.sleep(10)
     self._identify_vehicle()
     while True:
@@ -126,19 +115,21 @@ class GpxUploader():
         if is_offroad and self._delete_after_upload:
           for file in self._get_files():
             os.remove(file)
-        _debug("run - no files, clean stash")
+            cloudlog.info(f"清理文件: {file}")
+        cloudlog.debug("无待上传文件")
       elif not self._is_online() and self._delete_after_upload:
-        _debug("run - not online & delete_after_upload")
+        cloudlog.info("离线状态，删除待上传文件")
         for file in files:
           os.remove(file)
+          cloudlog.info(f"删除文件: {file}")
       else:
         for file in files:
           if self._do_upload(file):
             if self._delete_after_upload:
-              _debug("run - _delete_after_upload")
+              cloudlog.info(f"上传成功，删除文件: {file}")
               os.remove(file)
             else:
-              _debug("run - set_is_uploaded")
+              cloudlog.info(f"上传成功，标记文件: {file}")
               self._set_is_uploaded(file)
       time.sleep(60)
 

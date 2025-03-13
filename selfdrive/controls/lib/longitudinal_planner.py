@@ -15,21 +15,34 @@ from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
 from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, CONTROL_N, get_speed_error
-from openpilot.system.swaglog import cloudlog
-
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.vision_turn_controller import VisionTurnController
 from openpilot.selfdrive.controls.lib.accel_controller import AccelController
 from openpilot.selfdrive.controls.lib.dynamic_endtoend_controller import DynamicEndtoEndController
 
-LON_MPC_STEP = 0.2  # first step is 0.2s
-A_CRUISE_MIN = -1.2
-A_CRUISE_MAX_VALS = [1.6, 1.2, 0.8, 0.6]
-A_CRUISE_MAX_BP = [0., 10.0, 25., 40.]
+# MPC控制器基础参数
+LON_MPC_STEP = 0.15                   # MPC预测第一步时间间隔(s)，降低以提高控制精度
 
-# Lookup table for turns
-_A_TOTAL_MAX_V = [1.7, 3.2]
-_A_TOTAL_MAX_BP = [20., 40.]
+# 驾驶员注意力检测相关
+AWARENESS_DECEL = -0.2                # 注意力分散时的减速度(m/s²)，保持平缓以避免突然减速
 
+# 巡航控制加速度限制
+A_CRUISE_MIN = -1.5                   # 最大允许减速度(m/s²)，提高紧急制动能力
+A_CRUISE_MAX_VALS = [1.5, 1.2, 0.8, 0.5]  # 不同速度下的最大加速度(m/s²):
+                                          # 0-20 m/s: 1.5 m/s² (强力加速)
+                                          # 20-30 m/s: 1.2 m/s² (中等加速)
+                                          # 30-45 m/s: 0.8 m/s² (平缓加速)
+                                          # >45 m/s: 0.5 m/s² (高速巡航)
+A_CRUISE_MAX_BP = [0., 20., 30., 45.]     # 加速度切换点速度阈值(m/s)
+
+# 转弯工况下的动态控制参数
+_A_TOTAL_MAX_V = [1.5, 2.0, 2.5]     # 不同速度下的最大合成加速度(m/s²):
+                                     # 低速(0-15m/s): 1.5 m/s²
+                                     # 中速(15-30m/s): 2.0 m/s²
+                                     # 高速(>30m/s): 2.5 m/s²
+_A_TOTAL_MAX_BP = [15., 30., 45.]    # 转弯工况加速度切换点速度阈值(m/s)
+
+V_ACC_MIN = 9.72  # 35 kph
 
 def get_max_accel(v_ego):
   return interp(v_ego, A_CRUISE_MAX_BP, A_CRUISE_MAX_VALS)
@@ -174,9 +187,9 @@ class LongitudinalPlanner:
     self.mpc.set_accel_limits(accel_limits_turns[0], accel_limits_turns[1])
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
     x, v, a, j = self.parse_model(sm['modelV2'], self.v_model_error, v_ego, taco=True)
-    self.dp_long_use_krkeegen_tune_active = self.dp_long_use_krkeegen_tune and v_ego <= 7.5
+    self.dp_long_use_krkeegen_tune_active = self.dp_long_use_krkeegen_tune and v_ego <= V_ACC_MIN
     self.dp_long_use_df_tune_active = self.dp_long_use_df_tune and sm['radarState'].leadOne.status
-    self.mpc.update(sm['radarState'], v_cruise_sol, x, v, a, j, personality=self.personality, use_df_tune=self.dp_long_use_df_tune_active, use_krkeegen_tune=self.dp_long_use_krkeegen_tune_active)
+    self.mpc.update(sm['carState'], sm['radarState'], v_cruise_sol, x, v, a, j, personality=self.personality, use_df_tune=self.dp_long_use_df_tune_active, use_krkeegen_tune=self.dp_long_use_krkeegen_tune_active)
 
     self.v_desired_trajectory_full = np.interp(ModelConstants.T_IDXS, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory_full = np.interp(ModelConstants.T_IDXS, T_IDXS_MPC, self.mpc.a_solution)

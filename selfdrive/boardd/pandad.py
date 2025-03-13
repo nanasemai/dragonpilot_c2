@@ -13,7 +13,7 @@ from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.selfdrive.boardd.set_time import set_time
 from openpilot.system.hardware import HARDWARE
-from openpilot.system.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog
 
 
 def get_expected_signature(panda: Panda) -> bytes:
@@ -126,33 +126,41 @@ def panda_sort_cmp(a: Panda, b: Panda):
 
 
 def main() -> NoReturn:
+  # 设置日志模块名称
+  cloudlog.bind_global(module='pandad')
+  
   count = 0
   first_run = True
   params = Params()
+  last_log_time = 0
+  LOG_INTERVAL = 10
 
   while True:
     try:
       count += 1
-      cloudlog.event("pandad.flash_and_connect", count=count)
+      current_time = time.time()
+      if current_time - last_log_time >= LOG_INTERVAL:
+        cloudlog.info("pandad status", count=count)
+        last_log_time = current_time
       params.remove("PandaSignatures")
 
       # Flash all Pandas in DFU mode
       dfu_serials = PandaDFU.list()
       if len(dfu_serials) > 0:
         for serial in dfu_serials:
-          cloudlog.info(f"Panda in DFU mode found, flashing recovery {serial}")
+          cloudlog.info(f"Found Panda in DFU mode, flashing recovery firmware", serial=serial)
           PandaDFU(serial).recover()
         time.sleep(1)
 
       panda_serials = Panda.list()
       if len(panda_serials) == 0:
         if first_run:
-          cloudlog.info("No pandas found, resetting internal panda")
+          cloudlog.info("No Panda found, resetting internal Panda")
           HARDWARE.reset_internal_panda()
-          time.sleep(2)  # wait to come back up
+          time.sleep(2)
         continue
 
-      cloudlog.info(f"{len(panda_serials)} panda(s) found, connecting - {panda_serials}")
+      cloudlog.info("Panda device connection status", count=len(panda_serials), serials=panda_serials)
 
       # Flash pandas
       pandas: List[Panda] = []

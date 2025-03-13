@@ -1,0 +1,41 @@
+{% extends "layout.html" %}
+
+{% block title %}
+    GPS记录
+{% endblock %}
+
+{% block main %}
+    <br>
+    <h1>GPS记录</h1>
+    <br>
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead class="table-light">
+                <tr>
+                    <th>文件名</th>
+                    <th>修改时间</th>
+                    <th>大小</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td>
+                            <a href="/gpx_logs/{{ row.name }}">
+                                📍 {{ row.name }}
+                            </a>
+                        </td>
+                        <td>{{ row.mtime }}</td>
+                        <td>{{ row.size }}</td>
+                        <td>
+                            <a href="/download/gpx_logs/{{ row.name }}" class="btn btn-sm btn-outline-success">
+                                下载
+                            </a>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}

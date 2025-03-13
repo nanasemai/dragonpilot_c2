@@ -84,6 +84,7 @@ struct LateralPlanExt @0xf35cc4560bbf6ec2 {
 struct ControlsStateExt @0xda96579883444c35 {
   alkaActive @0 :Bool;
   alkaEnabled @1 :Bool;
+  lateralState @2 :Text;
 }
 
 struct CustomReserved4 @0x80ae746ee2596b11 {

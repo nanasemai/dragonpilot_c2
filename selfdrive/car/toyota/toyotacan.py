@@ -4,11 +4,13 @@ SteerControlType = car.CarParams.SteerControlType
 
 
 def create_steer_command(packer, steer, steer_req):
-  """Creates a CAN message for the Toyota Steer Command."""
+  # 添加参数验证
+  if not isinstance(steer, (int, float)) or abs(steer) > 1500:  # 转向扭矩限制
+    return None
 
   values = {
-    "STEER_REQUEST": steer_req,
-    "STEER_TORQUE_CMD": steer,
+    "STEER_REQUEST": bool(steer_req),  # 确保是布尔值
+    "STEER_TORQUE_CMD": int(steer),    # 确保是整数
     "SET_ME_1": 1,
   }
   return packer.make_can_msg("STEERING_LKA", 0, values)
@@ -16,7 +18,6 @@ def create_steer_command(packer, steer, steer_req):
 
 def create_lta_steer_command(packer, steer_control_type, steer_angle, steer_req, frame, torque_wind_down):
   """Creates a CAN message for the Toyota LTA Steer Command."""
-
   values = {
     "COUNTER": frame + 128,
     "SETME_X1": 1,  # suspected LTA feature availability
@@ -33,18 +34,19 @@ def create_lta_steer_command(packer, steer_control_type, steer_angle, steer_req,
   return packer.make_can_msg("STEERING_LTA", 0, values)
 
 
-def create_accel_command(packer, accel, pcm_cancel, standstill_req, lead, acc_type, fcw_alert):
+def create_accel_command(packer, accel, accel_raw, pcm_cancel, standstill_req, lead, acc_type, fcw_alert, distance):
   # TODO: find the exact canceling bit that does not create a chime
   values = {
     "ACCEL_CMD": accel,
     "ACC_TYPE": acc_type,
-    "DISTANCE": 0,
+    "DISTANCE": distance,
     "MINI_CAR": lead,
     "PERMIT_BRAKING": 1,
     "RELEASE_STANDSTILL": not standstill_req,
     "CANCEL_REQ": pcm_cancel,
     "ALLOW_LONG_PRESS": 1,
     "ACC_CUT_IN": fcw_alert,  # only shown when ACC enabled
+    "ACCEL_CMD_ALT":  accel_raw,  # raw accel command, pcm uses this to calculate a compensatory force
   }
   return packer.make_can_msg("ACC_CONTROL", 0, values)
 

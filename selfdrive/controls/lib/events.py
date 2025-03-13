@@ -259,7 +259,7 @@ def no_gps_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, m
   return Alert(
     _("Poor GPS reception"),
     _("Hardware malfunctioning if sky is visible"),
-    AlertStatus.normal, AlertSize.mid,
+    AlertStatus.normal, AlertSize.small,
     Priority.LOWER, VisualAlert.none, AudibleAlert.none, .2, creation_delay=300.)
 
 # *** debug alerts ***

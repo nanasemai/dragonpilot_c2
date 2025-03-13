@@ -9,7 +9,7 @@ from cereal import messaging, log, car
 from openpilot.common.numpy_fast import interp
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper, Priority, config_realtime_process
-from openpilot.system.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware import TICI
 
 from openpilot.common.kalman.simple_kalman import KF1D
@@ -32,7 +32,7 @@ class KalmanParams:
   def __init__(self, dt: float):
     # Lead Kalman Filter params, calculating K from A, C, Q, R requires the control library.
     # hardcoding a lookup table to compute K for values of radar_ts between 0.01s and 0.2s
-    assert dt > .01 and dt < .2, "Radar time step must be between .01s and 0.2s"
+    assert .01 < dt < .2, "Radar time step must be between .01s and 0.2s"
     self.A = [[1.0, dt], [0.0, 1.0]]
     self.C = [1.0, 0.0]
     #Q = np.matrix([[10., 0.0], [0.0, 100.]])

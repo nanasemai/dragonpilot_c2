@@ -2,7 +2,7 @@ import time
 import numpy as np
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.numpy_fast import interp
-from openpilot.system.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.lateral_mpc_lib.lat_mpc import LateralMpc
 from openpilot.selfdrive.controls.lib.lateral_mpc_lib.lat_mpc import N as LAT_MPC_N
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, MIN_SPEED, get_speed_error
@@ -80,6 +80,16 @@ class LateralPlanner:
     self.v_ego = max(MIN_SPEED, sm['carState'].vEgo)
     measured_curvature = sm['controlsState'].curvature
 
+    # 确保在调用set_weights前设置当前车速
+    self.lat_mpc.current_v_ego = self.v_ego
+
+    # 同时更新p参数，确保求解器内部状态一致
+    lateral_factor = max(0, self.factor1 - (self.factor2 * self.v_ego**2))
+    p = np.array([self.v_ego, lateral_factor])
+    # 预先设置参数，避免在set_weights中获取失败
+    for i in range(LAT_MPC_N + 1):
+      self.lat_mpc.solver.set(i, "p", p)
+
     if self.param_read_counter % 50 == 0:
       self._dp_lat_lane_priority_mode = self.params.get_bool("dp_lat_lane_priority_mode")
       if self._dp_lat_lane_priority_mode:
@@ -106,7 +116,7 @@ class LateralPlanner:
     else:
       lane_change_prob = self.l_lane_change_prob + self.r_lane_change_prob
 
-    self.DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, self._dp_lat_lane_change_assist_speed)
+    self.DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, model_data=md)
 
     if self._dp_lat_lane_priority_mode:
       d_path_xyz = self._get_laneless_laneline_d_path_xyz()

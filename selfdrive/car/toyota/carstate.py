@@ -9,9 +9,10 @@ from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from openpilot.selfdrive.car.interfaces import CarStateBase
 from openpilot.selfdrive.car.toyota.values import ToyotaFlags, CAR, DBC, STEER_THRESHOLD, NO_STOP_TIMER_CAR, \
-                                                  TSS2_CAR, RADAR_ACC_CAR, EPS_SCALE, UNSUPPORTED_DSU_CAR
+  TSS2_CAR, RADAR_ACC_CAR, EPS_SCALE, UNSUPPORTED_DSU_CAR
 
 from openpilot.common.params import Params
+from openpilot.common.swaglog import cloudlog
 
 SteerControlType = car.CarParams.SteerControlType
 
@@ -21,9 +22,17 @@ SteerControlType = car.CarParams.SteerControlType
 #     if using the other control command, goes directly to 3 after 1.5 seconds
 # - initializing: LTA can report 0 as long as STEER_TORQUE_SENSOR->STEER_ANGLE_INITIALIZING is 1,
 #     and is a catch-all for LKA
+#  这些转向故障定义似乎在LKA（扭矩）和LTA（角度）中很常见：
+#  -高转向率故障：在1帧内变为21或25，然后在2秒内变为9
+#  -lka/lta msg退出：先是9秒，然后是11秒，总共2秒，然后3秒。
+#  如果使用其他控制命令，则在1.5秒后直接转到3
+#  -初始化：只要STEER_TORQUE_SENSOR->STEER_ANGLE_initializing为1，LTA就可以报告0，
+#  对LKA来说是包罗万象的
 TEMP_STEER_FAULTS = (0, 9, 11, 21, 25)
 # - lka/lta msg drop out: 3 (recoverable)
 # - prolonged high driver torque: 17 (permanent)
+#-lka/lta msg退出：3（可恢复）
+#-长时间高驱动扭矩：17（永久）
 PERM_STEER_FAULTS = (3, 17)
 
 ZSS_THRESHOLD = 4.0
@@ -41,8 +50,16 @@ class CarState(CarStateBase):
     # On cars with cp.vl["STEER_TORQUE_SENSOR"]["STEER_ANGLE"]
     # the signal is zeroed to where the steering angle is at start.
     # Need to apply an offset as soon as the steering angle measurements are both received
+    # 在配备cp.vl[“STEER_TORQUE_SENSOR”][“STEER_ANGLE”]的汽车上
+    # 信号被归零到转向角开始的位置。
+    # 在收到两个转向角测量值后，需要立即应用偏移
     self.accurate_steer_angle_seen = False
     self.angle_offset = FirstOrderFilter(None, 60.0, DT_CTRL, initialized=False)
+
+    self.prev_distance_button = 0
+    self.distance_button = 0
+
+    self.pcm_follow_distance = 0
 
     self.low_speed_lockout = False
     self.acc_type = 1
@@ -68,6 +85,10 @@ class CarState(CarStateBase):
     self._right_blindspot_d1 = 0
     self._right_blindspot_d2 = 0
     self._right_blindspot_counter = 0
+    # BSM 超时时间常量
+    self._BSM_COUNTER_MAX = 100
+    self._BSM_TIMEOUT = 0.5  # 秒
+    self._last_bsm_update = 0.
 
 
   def update(self, cp, cp_cam):
@@ -93,11 +114,14 @@ class CarState(CarStateBase):
       cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RL"],
       cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RR"],
     )
-    ret.vEgoRaw = mean([ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr])
+    # 过滤掉异常值
+    wheel_speeds = [ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr]
+    valid_speeds = [s for s in wheel_speeds if abs(s) < 150]  # 过滤掉不合理的速度值
+    ret.vEgoRaw = mean(valid_speeds) if valid_speeds else 0.0
     ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
     ret.vEgoCluster = ret.vEgo * 1.015  # minimum of all the cars
 
-    ret.standstill = ret.vEgoRaw == 0
+    ret.standstill = abs(ret.vEgoRaw) < 1e-3
 
     ret.steeringAngleDeg = cp.vl["STEER_ANGLE_SENSOR"]["STEER_ANGLE"] + cp.vl["STEER_ANGLE_SENSOR"]["STEER_FRACTION"]
     ret.steeringRateDeg = cp.vl["STEER_ANGLE_SENSOR"]["STEER_RATE"]
@@ -120,34 +144,44 @@ class CarState(CarStateBase):
     # if diff between steeringAngleDeg and ZSS is too large, disable ZSS
     if self._dp_zss_threshold_count > ZSS_THRESHOLD_COUNT:
       self._dp_toyota_zss = False
-
     if self._dp_toyota_zss:
-      zorro_steer = cp.vl["SECONDARY_STEER_ANGLE"]["ZORRO_STEER"]
-      # rick - when alka is on, we check main_on state
-      acc_active = (self._dp_alka and cp.vl["PCM_CRUISE_2"]["MAIN_ON"] != 0) or bool(cp.vl["PCM_CRUISE"]["CRUISE_ACTIVE"])
-      # only compute zss offset when acc is active
-      if acc_active and not self._dp_zss_cruise_active_last:
-        self._dp_zss_threshold_count = 0
-        self._dp_zss_compute = True # cruise was just activated, so allow offset to be recomputed
-      self._dp_zss_cruise_active_last = acc_active
+      try:
+        zorro_steer = cp.vl["SECONDARY_STEER_ANGLE"]["ZORRO_STEER"]
+        if abs(zorro_steer) > 500:  # 添加合理性检查
+          self._dp_zss_threshold_count = ZSS_THRESHOLD_COUNT + 1
+        else:
+          zorro_steer = cp.vl["SECONDARY_STEER_ANGLE"]["ZORRO_STEER"]
+          # rick - when alka is on, we check main_on state
+          acc_active = (self._dp_alka and cp.vl["PCM_CRUISE_2"]["MAIN_ON"] != 0) or bool(cp.vl["PCM_CRUISE"]["CRUISE_ACTIVE"])
+          # only compute zss offset when acc is active
+          if acc_active and not self._dp_zss_cruise_active_last:
+            self._dp_zss_threshold_count = 0
+            self._dp_zss_compute = True # cruise was just activated, so allow offset to be recomputed
+          self._dp_zss_cruise_active_last = acc_active
 
-      # compute zss offset
-      if self._dp_zss_compute:
-        if abs(ret.steeringAngleDeg) > 1e-3 and abs(zorro_steer) > 1e-3:
-          self._dp_zss_compute = False
-          self._dp_zss_angle_offset = zorro_steer - ret.steeringAngleDeg
+          # compute zss offset
+          if self._dp_zss_compute:
+            if abs(ret.steeringAngleDeg) > 1e-3 and abs(zorro_steer) > 1e-3:
+              self._dp_zss_compute = False
+              self._dp_zss_angle_offset = zorro_steer - ret.steeringAngleDeg
 
-      # error check
-      new_steering_angle_deg = zorro_steer - self._dp_zss_angle_offset
-      if abs(ret.steeringAngleDeg - new_steering_angle_deg) > ZSS_THRESHOLD:
-        self._dp_zss_threshold_count += 1
-      else:
-        ret.steeringAngleDeg = new_steering_angle_deg
+          # error check
+          new_steering_angle_deg = zorro_steer - self._dp_zss_angle_offset
+          if abs(ret.steeringAngleDeg - new_steering_angle_deg) > ZSS_THRESHOLD:
+            self._dp_zss_threshold_count += 1
+          else:
+            ret.steeringAngleDeg = new_steering_angle_deg
+      except Exception as e:
+        self._dp_toyota_zss = False
+        cloudlog.exception("ZSS error")
 
     can_gear = int(cp.vl["GEAR_PACKET"]["GEAR"])
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
     ret.leftBlinker = cp.vl["BLINKERS_STATE"]["TURN_SIGNALS"] == 1
     ret.rightBlinker = cp.vl["BLINKERS_STATE"]["TURN_SIGNALS"] == 2
+
+    if self.CP.carFingerprint != CAR.MIRAI:
+      ret.engineRpm = cp.vl["ENGINE_RPM"]["RPM"]
 
     ret.steeringTorque = cp.vl["STEER_TORQUE_SENSOR"]["STEER_TORQUE_DRIVER"]
     ret.steeringTorqueEps = cp.vl["STEER_TORQUE_SENSOR"]["STEER_TORQUE_EPS"] * self.eps_torque_scale
@@ -191,7 +225,7 @@ class CarState(CarStateBase):
     # TODO: it is possible to avoid the lockout and gain stop and go if you
     # send your own ACC_CONTROL msg on startup with ACC_TYPE set to 1
     if (self.CP.carFingerprint not in TSS2_CAR and self.CP.carFingerprint not in UNSUPPORTED_DSU_CAR) or \
-       (self.CP.carFingerprint in TSS2_CAR and self.acc_type == 1):
+      (self.CP.carFingerprint in TSS2_CAR and self.acc_type == 1):
       self.low_speed_lockout = cp.vl["PCM_CRUISE_2"]["LOW_SPEED_LOCKOUT"] == 2
 
     self.pcm_acc_status = cp.vl["PCM_CRUISE"]["CRUISE_STATE"]
@@ -200,6 +234,8 @@ class CarState(CarStateBase):
       ret.cruiseState.standstill = self.pcm_acc_status == 7
     ret.cruiseState.enabled = bool(cp.vl["PCM_CRUISE"]["CRUISE_ACTIVE"])
     ret.cruiseState.nonAdaptive = cp.vl["PCM_CRUISE"]["CRUISE_STATE"] in (1, 2, 3, 4, 5, 6)
+    # dp - for pcm compensation
+    self.pcm_neutral_force = cp.vl["PCM_CRUISE"]["NEUTRAL_FORCE"]
 
     ret.genericToggle = bool(cp.vl["LIGHT_STALK"]["AUTO_HIGH_BEAM"])
     ret.espDisabled = cp.vl["ESP_CONTROL"]["TC_DISABLED"] != 0
@@ -213,6 +249,19 @@ class CarState(CarStateBase):
 
     if self.CP.carFingerprint != CAR.PRIUS_V:
       self.lkas_hud = copy.copy(cp_cam.vl["LKAS_HUD"])
+
+    # dp distance button
+    if self.CP.carFingerprint not in UNSUPPORTED_DSU_CAR:
+      self.pcm_follow_distance = cp.vl["PCM_CRUISE_2"]["PCM_FOLLOW_DISTANCE"]
+
+    if self.CP.carFingerprint in (TSS2_CAR - RADAR_ACC_CAR):
+      # distance button is wired to the ACC module (camera or radar)
+      self.prev_distance_button = self.distance_button
+      if self.CP.carFingerprint in (TSS2_CAR - RADAR_ACC_CAR):
+        self.distance_button = cp_acc.vl["ACC_CONTROL"]["DISTANCE"]
+
+    # dp - acc filter - distance button logic for sdsu not radar can filter
+    #self.prev_distance_button, self.distance_button = self.acc_filter_state.get_distance_button_states(self.prev_distance_button, self.distance_button)
 
     # Enable blindspot debug mode once (@arne182)
     # let's keep all the commented out code for easy debug purpose for future.
@@ -277,6 +326,9 @@ class CarState(CarStateBase):
       ("PCM_CRUISE_SM", 1),
       ("STEER_TORQUE_SENSOR", 50),
     ]
+
+    if CP.carFingerprint != CAR.MIRAI:
+      messages.append(("ENGINE_RPM", 42))
 
     if CP.carFingerprint in UNSUPPORTED_DSU_CAR:
       messages.append(("DSU_CRUISE", 5))

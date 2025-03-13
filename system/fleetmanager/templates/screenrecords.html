@@ -1,0 +1,48 @@
+{% extends "layout.html" %}
+
+{% block title %}
+    屏幕录像
+{% endblock %}
+
+{% block main %}
+    <br>
+    <h1>屏幕录像</h1>
+    <br>
+    <div class="container">
+        <video id="videoPlayer" width="480" height="360" controls class="mb-3">
+            <source src="/screenrecords/play/pipe/{{ clip }}" type="video/mp4">
+            您的浏览器不支持 HTML5 视频播放。
+        </video>
+        
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>文件名</th>
+                        <th>修改时间</th>
+                        <th>大小</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr class="{{ 'table-active' if row.name == clip }}">
+                            <td>
+                                <a href="/screenrecords/{{ row.name }}">
+                                    🎥 {{ row.name }}
+                                </a>
+                            </td>
+                            <td>{{ row.mtime }}</td>
+                            <td>{{ row.size }}</td>
+                            <td>
+                                <a href="/screenrecords/download/{{ row.name }}" class="btn btn-sm btn-outline-primary">
+                                    下载
+                                </a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+{% endblock %}

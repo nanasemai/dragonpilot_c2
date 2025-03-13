@@ -93,6 +93,11 @@ class LatControlINDI(LatControl):
 
       # Compute acceleration error
       rate_sp = self.outer_loop_gain * (steers_des - self.x[0]) + rate_des
+      
+      # 优化：添加低速平滑处理，提高低速转向舒适性
+      if self.speed < 10.0:  # 低于10m/s时
+        rate_sp = rate_sp * (0.7 + 0.3 * self.speed / 10.0)  # 低速时降低转向响应
+      
       accel_sp = self.inner_loop_gain * (rate_sp - self.x[1])
       accel_error = accel_sp - self.x[2]
 

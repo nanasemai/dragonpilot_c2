@@ -51,56 +51,158 @@ function two_init {
     cp -f "$BASEDIR/system/hardware/eon/update.zip" "/data/media/0/update.zip"
   fi
 
-  # set IO scheduler
-  setprop sys.io.scheduler noop
-  for f in /sys/block/*/queue/scheduler; do
-    echo noop > $f
-  done
-
   # *** shield cores 2-3 ***
+  # 获取设备运行模式，默认为普通模式
+  device_mode="1"
+  if [ -f /data/params/d/dp_device_mode ]; then
+    device_mode=$(cat /data/params/d/dp_device_mode)
+  fi
 
-  # TODO: should we enable this?
-  # offline cores 2-3 to force recurring timers onto the other cores
-  #echo 0 > /sys/devices/system/cpu/cpu2/online
-  #echo 0 > /sys/devices/system/cpu/cpu3/online
-  #echo 1 > /sys/devices/system/cpu/cpu2/online
-  #echo 1 > /sys/devices/system/cpu/cpu3/online
+  # set IO scheduler
+  case $device_mode in
+    "0") # 节能模式
+      setprop sys.io.scheduler cfq
+      for f in /sys/block/*/queue/scheduler; do
+        echo cfq > $f
+      done
+      ;;
+    "2") # 性能模式
+      setprop sys.io.scheduler deadline
+      for f in /sys/block/*/queue/scheduler; do
+        echo deadline > $f
+      done
+      ;;
+    *) # 普通模式（默认）
+      setprop sys.io.scheduler noop
+      for f in /sys/block/*/queue/scheduler; do
+        echo noop > $f
+      done
+      ;;
+  esac
 
-  # android gets two cores
-  echo 0-1 > /dev/cpuset/background/cpus
-  echo 0-1 > /dev/cpuset/system-background/cpus
-  echo 0-1 > /dev/cpuset/foreground/cpus
-  echo 0-1 > /dev/cpuset/foreground/boost/cpus
-  echo 0-1 > /dev/cpuset/android/cpus
-
-  # openpilot gets all the cores
-  echo 0-3 > /dev/cpuset/app/cpus
+  case $device_mode in
+    "0") # 节能模式
+      # android 使用两个核心
+      echo 0-1 > /dev/cpuset/background/cpus
+      echo 0-1 > /dev/cpuset/system-background/cpus
+      echo 0-1 > /dev/cpuset/foreground/cpus
+      echo 0-1 > /dev/cpuset/foreground/boost/cpus
+      echo 0-1 > /dev/cpuset/android/cpus
+      # openpilot 使用两个核心
+      echo 0-1 > /dev/cpuset/app/cpus
+      ;;
+    "2") # 性能模式
+      # android 使用一个核心
+      echo 0 > /dev/cpuset/background/cpus
+      echo 0 > /dev/cpuset/system-background/cpus
+      echo 0 > /dev/cpuset/foreground/cpus
+      echo 0 > /dev/cpuset/foreground/boost/cpus
+      echo 0 > /dev/cpuset/android/cpus
+      # openpilot 使用全部核心
+      echo 0-3 > /dev/cpuset/app/cpus
+      ;;
+    *) # 普通模式（默认）
+      # android 使用两个核心
+      echo 0-1 > /dev/cpuset/background/cpus
+      echo 0-1 > /dev/cpuset/system-background/cpus
+      echo 0-1 > /dev/cpuset/foreground/cpus
+      echo 0-1 > /dev/cpuset/foreground/boost/cpus
+      echo 0-1 > /dev/cpuset/android/cpus
+      # openpilot 使用三个核心
+      echo 0-3 > /dev/cpuset/app/cpus
+      ;;
+  esac
 
   # mask off 2-3 from RPS and XPS - Receive/Transmit Packet Steering
   echo 3 | tee  /sys/class/net/*/queues/*/rps_cpus
   echo 3 | tee  /sys/class/net/*/queues/*/xps_cpus
 
   # *** set up governors ***
+  case $device_mode in
+    "0") # 节能模式
+      echo "powersave" > /sys/class/devfreq/soc:qcom,cpubw/governor
+      if [ -f /ONEPLUS ]; then
+        echo 902400 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+      else
+        echo 768000 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+      fi
+      echo "powersave" > /sys/class/devfreq/soc:qcom,m4m/governor
+      echo "powersave" > /sys/class/devfreq/soc:qcom,memlat-cpu0/governor
+      echo "powersave" > /sys/class/devfreq/soc:qcom,memlat-cpu2/governor
+      echo "powersave" > /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor
+      ;;
+    "2") # 性能模式
+      echo "performance" > /sys/class/devfreq/soc:qcom,cpubw/governor
+      if [ -f /ONEPLUS ]; then
+        echo 1593600 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+      else
+        echo 1190400 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+      fi
+      echo "performance" > /sys/class/devfreq/soc:qcom,m4m/governor
+      echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu0/governor
+      echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu2/governor
+      echo "performance" > /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor
+      ;;
+    *) # 普通模式（默认）
+      echo "performance" > /sys/class/devfreq/soc:qcom,cpubw/governor
+      if [ -f /ONEPLUS ]; then
+        echo 1363200 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+      else
+        echo 1056000 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+      fi
+      echo "performance" > /sys/class/devfreq/soc:qcom,m4m/governor
+      echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu0/governor
+      echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu2/governor
+      echo "performance" > /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor
+      ;;
+  esac
 
-  # +50mW offroad, +500mW onroad for 30% more RAM bandwidth
-  echo "performance" > /sys/class/devfreq/soc:qcom,cpubw/governor
-  # available freq:
-  # 192000000 307200000 384000000 441600000 537600000 614400000 691200000
-  # 768000000 844800000 902400000 979200000 "1056000000" 1132800000
-  # 1190400000 1286400000 1363200000 1440000000 1516800000 1593600000
-  if [ -f /ONEPLUS ]; then
-    echo 1363200 > /sys/class/devfreq/soc:qcom,m4m/max_freq
-  else
-    echo 1056000 > /sys/class/devfreq/soc:qcom,m4m/max_freq
-  fi
-  echo "performance" > /sys/class/devfreq/soc:qcom,m4m/governor
+  # *** set up governors ***
+  case $device_mode in
+    "0") # 节能模式
+      # 降低内存压力
+      echo 60 > /proc/sys/vm/swappiness
+      echo 1000 > /proc/sys/vm/vfs_cache_pressure
+      ;;
+    "2") # 性能模式
+      # 优化内存使用
+      echo 0 > /proc/sys/vm/swappiness
+      echo 50 > /proc/sys/vm/vfs_cache_pressure
+      ;;
+    *) # 普通模式（默认）
+      # 平衡内存设置
+      echo 30 > /proc/sys/vm/swappiness
+      echo 100 > /proc/sys/vm/vfs_cache_pressure
+      ;;
+  esac
 
-  # unclear if these help, but they don't seem to hurt
-  echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu0/governor
-  echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu2/governor
-
-  # GPU
-  echo "performance" > /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor
+  # 温控设置
+  case $device_mode in
+    "0") # 节能模式
+      # 标准温控设置
+      echo 82000 > /sys/class/thermal/thermal_zone0/trip_point_0_temp
+      echo 92000 > /sys/class/thermal/thermal_zone0/trip_point_1_temp
+      # 限制最大 CPU 频率
+      echo 1401600 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+      echo 1401600 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
+      ;;
+    "2") # 性能模式
+      # 略微提升温度阈值
+      echo 84000 > /sys/class/thermal/thermal_zone0/trip_point_0_temp
+      echo 94000 > /sys/class/thermal/thermal_zone0/trip_point_1_temp
+      # 提高最大 CPU 频率
+      echo 2016000 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+      echo 2016000 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
+      ;;
+    *) # 普通模式（默认）
+      # 标准温控设置
+      echo 82000 > /sys/class/thermal/thermal_zone0/trip_point_0_temp
+      echo 92000 > /sys/class/thermal/thermal_zone0/trip_point_1_temp
+      # 默认 CPU 频率
+      echo 1804800 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+      echo 1804800 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
+      ;;
+  esac
 
   # /sys/class/devfreq/soc:qcom,mincpubw is the only one left at "powersave"
   # it seems to gain nothing but a wasted 500mW

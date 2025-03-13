@@ -2,7 +2,7 @@ import numpy as np
 import time
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.numpy_fast import interp
-from openpilot.system.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.legacy_lateral_mpc_lib.lat_mpc import LateralMpc
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, MPC_COST_LAT, LAT_MPC_N, CAR_ROTATION_RADIUS
 from openpilot.selfdrive.controls.lib.lane_planner import LanePlanner, TRAJECTORY_SIZE
@@ -12,42 +12,58 @@ from cereal import log
 from openpilot.common.params import Params
 from openpilot.common.conversions import Conversions as CV
 
+# 不同车型的转向率成本配置
 STEER_RATE_COST = {
-  "chrysler": 0.7,
-  "ford": 1.,
-  "gm": 1.,
-  "honda": 0.5,
-  "hyundai": 0.5,
-  "mazda": 1.,
-  "nissan": 0.5,
-  "subaru": 0.7,
-  "tesla": 0.5,
-  "toyota": 1.,
-  "volkswagen": 1.,
+  "chrysler": 0.7,    # 克莱斯勒：中等偏低的转向灵敏度
+  "ford": 1.,         # 福特：标准转向灵敏度
+  "gm": 1.,          # 通用：标准转向灵敏度
+  "honda": 0.5,      # 本田：较低转向阻尼，更灵敏的转向响应
+  "hyundai": 0.5,    # 现代：较低转向阻尼，更灵敏的转向响应
+  "mazda": 1.,       # 马自达：标准转向灵敏度
+  "nissan": 0.5,     # 日产：较低转向阻尼，更灵敏的转向响应
+  "subaru": 0.7,     # 斯巴鲁：中等偏低的转向灵敏度
+  "tesla": 0.5,      # 特斯拉：较低转向阻尼，更灵敏的转向响应
+  "toyota": 1.,      # 丰田：标准转向灵敏度
+  "volkswagen": 1.,  # 大众：标准转向灵敏度
 }
 
 class LateralPlanner:
+  """横向路径规划器
+    主要功能：
+    1. 处理车道线检测结果
+    2. 计算期望行驶路径
+    3. 执行MPC优化求解
+    4. 处理换道逻辑
+    """
   def __init__(self, CP, debug=False):
+    """初始化规划器
+        组件初始化：
+        - LP: 车道规划器
+        - DH: 换道决策助手
+        - MPC: 模型预测控制器
+    """
     self.LP = LanePlanner()
     self.DH = DesireHelper()
     self.params = Params()
+    # 车道优先模式配置
     self._dp_lat_lane_priority_mode = self.params.get_bool("dp_lat_lane_priority_mode")
     self._dp_lat_lane_priority_mode_active = False
     self._dp_lat_lane_priority_mode_active_prev = False
+    # 换道辅助速度阈值
     self._dp_lat_lane_change_assist_speed = int(self.params.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.MPH_TO_MS
-
     self.last_cloudlog_t = 0
+    # 获取车型特定的转向率成本
     try:
       self.steer_rate_cost = STEER_RATE_COST[CP.carName]
     except:
       self.steer_rate_cost = 0.
     self.solution_invalid_cnt = 0
-
-    self.path_xyz = np.zeros((TRAJECTORY_SIZE, 3))
-    self.path_xyz_stds = np.ones((TRAJECTORY_SIZE, 3))
-    self.plan_yaw = np.zeros((TRAJECTORY_SIZE,))
+    # 初始化路径数组
+    self.path_xyz = np.zeros((TRAJECTORY_SIZE, 3))  # 预测路径点
+    self.path_xyz_stds = np.ones((TRAJECTORY_SIZE, 3)) # 路径点标准差
+    self.plan_yaw = np.zeros((TRAJECTORY_SIZE,)) # 预测偏航角
     self.t_idxs = np.arange(TRAJECTORY_SIZE)
-    self.y_pts = np.zeros(TRAJECTORY_SIZE)
+    self.y_pts = np.zeros(TRAJECTORY_SIZE) # 横向位置点
     # dp // mapd - for vision turn controller
     self._d_path_w_lines_xyz = np.zeros((TRAJECTORY_SIZE, 3))
 
@@ -59,10 +75,17 @@ class LateralPlanner:
     self.lat_mpc.reset(x0=self.x0)
 
   def update(self, sm):
+    """更新规划器状态和计算控制输出
+      主要步骤：
+      1. 解析模型预测结果
+      2. 处理换道逻辑
+      3. 计算最终行驶路径
+      4. 执行MPC优化
+    """
     v_ego = sm['carState'].vEgo
     measured_curvature = sm['controlsState'].curvature
 
-    # Parse model predictions
+    # Parse model predictions # 解析视觉模型输出
     md = sm['modelV2']
     self.LP.parse_model(md)
     if len(md.position.x) == TRAJECTORY_SIZE and len(md.orientation.x) == TRAJECTORY_SIZE:
@@ -72,11 +95,11 @@ class LateralPlanner:
     if len(md.position.xStd) == TRAJECTORY_SIZE:
       self.path_xyz_stds = np.column_stack([md.position.xStd, md.position.yStd, md.position.zStd])
 
-    # Lane change logic
+    # Lane change logic 处理换道逻辑
     lane_change_prob = self.LP.l_lane_change_prob + self.LP.r_lane_change_prob
-    self.DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, self._dp_lat_lane_change_assist_speed)
+    self.DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob, model_data=md)
 
-    # Turn off lanes during lane change
+    # Turn off lanes during lane change 换道时降低车道线置信度
     if self.DH.desire == log.LateralPlan.Desire.laneChangeRight or self.DH.desire == log.LateralPlan.Desire.laneChangeLeft:
       self.LP.lll_prob *= self.DH.lane_change_ll_prob
       self.LP.rll_prob *= self.DH.lane_change_ll_prob
@@ -87,11 +110,14 @@ class LateralPlanner:
       self._update_laneless_laneline_mode()
       use_laneline = self._dp_lat_lane_priority_mode_active
 
+    # 根据模式选择计算最终路径
     # Calculate final driving path and set MPC costs
     if use_laneline:
+      # 使用车道线模式
       d_path_xyz = self.LP.get_d_path(v_ego, self.t_idxs, self.path_xyz)
       self.lat_mpc.set_weights(MPC_COST_LAT.PATH, MPC_COST_LAT.HEADING, self.steer_rate_cost)
     else:
+      # 使用视觉路径模式
       d_path_xyz = self.path_xyz
       path_cost = np.clip(abs(self.path_xyz[0, 1] / self.path_xyz_stds[0, 1]), 0.5, 1.5) * MPC_COST_LAT.PATH
       # Heading cost is useful at low speed, otherwise end of plan can be off-heading
@@ -99,7 +125,7 @@ class LateralPlanner:
       self.lat_mpc.set_weights(path_cost, heading_cost, self.steer_rate_cost)
 
     self._d_path_w_lines_xyz = d_path_xyz
-
+    # 执行MPC优化
     y_pts = np.interp(v_ego * self.t_idxs[:LAT_MPC_N + 1], np.linalg.norm(d_path_xyz, axis=1), d_path_xyz[:, 1])
     heading_pts = np.interp(v_ego * self.t_idxs[:LAT_MPC_N + 1], np.linalg.norm(self.path_xyz, axis=1), self.plan_yaw)
     self.y_pts = y_pts
@@ -107,6 +133,7 @@ class LateralPlanner:
     assert len(y_pts) == LAT_MPC_N + 1
     assert len(heading_pts) == LAT_MPC_N + 1
     # self.x0[4] = v_ego
+    # 运行MPC求解器
     p = np.array([v_ego, CAR_ROTATION_RADIUS])
     self.lat_mpc.run(self.x0,
                      p,

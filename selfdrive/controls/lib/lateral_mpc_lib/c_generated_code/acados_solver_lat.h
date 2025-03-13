@@ -60,7 +60,7 @@
 #define LAT_NY0    5
 #define LAT_NY     5
 #define LAT_NYN    3
-#define LAT_N      16
+#define LAT_N      32
 #define LAT_NH     0
 #define LAT_NPHI   0
 #define LAT_NHN    0

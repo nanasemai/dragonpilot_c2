@@ -7,15 +7,13 @@ import subprocess
 from typing import Optional, Callable, List, ValuesView
 from abc import ABC, abstractmethod
 from multiprocessing import Process
-
-from setproctitle import setproctitle  # pylint: disable=no-name-in-module
-
+from setproctitle import setproctitle
 from cereal import car, log
 import cereal.messaging as messaging
 import openpilot.selfdrive.sentry as sentry
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
-from openpilot.system.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog
 
 WATCHDOG_FN = "/dev/shm/wd_"
 ENABLE_WATCHDOG = os.getenv("NO_WATCHDOG") is None
@@ -89,9 +87,7 @@ def join_process(process: Process, timeout: float) -> None:
 class ManagerProcess(ABC):
   daemon = False
   sigkill = False
-  onroad = True
-  offroad = False
-  callback: Optional[Callable[[bool, Params, car.CarParams], bool]] = None
+  should_run: Callable[[bool, Params, car.CarParams], bool]
   proc: Optional[Process] = None
   enabled = True
   name = ""
@@ -108,31 +104,43 @@ class ManagerProcess(ABC):
   @abstractmethod
   def start(self) -> None:
     pass
-
-  def restart(self) -> None:
-    self.stop(sig=signal.SIGKILL)
-    self.start()
-
-  def check_watchdog(self, started: bool) -> None:
+  def check_watchdog(self, started: bool) -> None:  # 修复缩进
     if self.watchdog_max_dt is None or self.proc is None:
       return
-
     try:
       fn = WATCHDOG_FN + str(self.proc.pid)
       with open(fn, "rb") as f:
-        # TODO: why can't pylint find struct.unpack?
-        self.last_watchdog_time = struct.unpack('Q', f.read())[0] # pylint: disable=no-member
+        self.last_watchdog_time = struct.unpack('Q', f.read())[0]
     except Exception:
       pass
-
     dt = time.monotonic() - self.last_watchdog_time / 1e9
-
+    # 添加重启计数和冷却时间
+    if not hasattr(self, 'restart_count'):
+      self.restart_count = 0
+      self.last_restart_time = 0
+    current_time = time.monotonic()
     if dt > self.watchdog_max_dt:
       if self.watchdog_seen and ENABLE_WATCHDOG:
+        # 检查重启频率
+        if current_time - self.last_restart_time > 300:  # 5分钟重置计数
+          self.restart_count = 0
+
+        self.restart_count += 1
+        if self.restart_count > 3:  # 如果5分钟内重启超过3次
+          cloudlog.error(f"Process {self.name} restarting too frequently, waiting for cool down")
+          time.sleep(60)  # 等待1分钟再重启
+          self.restart_count = 0
+
+        self.last_restart_time = current_time
         cloudlog.error(f"Watchdog timeout for {self.name} (exitcode {self.proc.exitcode}) restarting ({started=})")
         self.restart()
     else:
       self.watchdog_seen = True
+
+  def restart(self) -> None:
+    if self.proc is not None:
+      self.stop()
+    self.start()
 
   def stop(self, retry: bool = True, block: bool = True, sig: Optional[signal.Signals] = None) -> Optional[int]:
     if self.proc is None:
@@ -193,15 +201,12 @@ class ManagerProcess(ABC):
 
 
 class NativeProcess(ManagerProcess):
-  def __init__(self, name, cwd, cmdline, enabled=True, onroad=True, offroad=False, callback=None, unkillable=False, sigkill=False, watchdog_max_dt=None):
+  def __init__(self, name, cwd, cmdline, should_run, enabled=True, sigkill=False, watchdog_max_dt=None):
     self.name = name
     self.cwd = cwd
     self.cmdline = cmdline
+    self.should_run = should_run
     self.enabled = enabled
-    self.onroad = onroad
-    self.offroad = offroad
-    self.callback = callback
-    self.unkillable = unkillable
     self.sigkill = sigkill
     self.watchdog_max_dt = watchdog_max_dt
     self.launcher = nativelauncher
@@ -226,14 +231,11 @@ class NativeProcess(ManagerProcess):
 
 
 class PythonProcess(ManagerProcess):
-  def __init__(self, name, module, enabled=True, onroad=True, offroad=False, callback=None, unkillable=False, sigkill=False, watchdog_max_dt=None):
+  def __init__(self, name, module, should_run, enabled=True, sigkill=False, watchdog_max_dt=None):
     self.name = name
     self.module = module
+    self.should_run = should_run
     self.enabled = enabled
-    self.onroad = onroad
-    self.offroad = offroad
-    self.callback = callback
-    self.unkillable = unkillable
     self.sigkill = sigkill
     self.watchdog_max_dt = watchdog_max_dt
     self.launcher = launcher
@@ -268,9 +270,11 @@ class DaemonProcess(ManagerProcess):
     self.module = module
     self.param_name = param_name
     self.enabled = enabled
-    self.onroad = True
-    self.offroad = True
     self.params = None
+
+  @staticmethod
+  def should_run(started, params, CP):
+    return True
 
   def prepare(self) -> None:
     pass
@@ -292,11 +296,11 @@ class DaemonProcess(ManagerProcess):
         pass
 
     cloudlog.info(f"starting daemon {self.name}")
-    proc = subprocess.Popen(['python', '-m', self.module],  # pylint: disable=subprocess-popen-preexec-fn
-                               stdin=open('/dev/null'),
-                               stdout=open('/dev/null', 'w'),
-                               stderr=open('/dev/null', 'w'),
-                               preexec_fn=os.setpgrp)
+    proc = subprocess.Popen(['python', '-m', self.module],
+                            stdin=open('/dev/null'),
+                            stdout=open('/dev/null', 'w'),
+                            stderr=open('/dev/null', 'w'),
+                            preexec_fn=os.setpgrp)
 
     self.params.put(self.param_name, str(proc.pid))
 
@@ -311,26 +315,14 @@ def ensure_running(procs: ValuesView[ManagerProcess], started: bool, params=None
 
   running = []
   for p in procs:
-    # Conditions that make a process run
-    run = any((
-      p.offroad and not started,
-      p.onroad and started,
-    ))
-    if p.callback is not None and None not in (params, CP):
-      run = run or p.callback(started, params, CP)
-
-    # Conditions that block a process from starting
-    run = run and not any((
-      not p.enabled,
-      p.name in not_run,
-    ))
-
-    if run:
-      p.start()
+    if p.enabled and p.name not in not_run and p.should_run(started, params, CP):
       running.append(p)
     else:
       p.stop(block=False)
 
     p.check_watchdog(started)
+
+  for p in running:
+    p.start()
 
   return running

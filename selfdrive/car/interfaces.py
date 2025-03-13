@@ -1,62 +1,205 @@
+import json
 import os
 import time
 import numpy as np
 # rick - use tomli instead of tomllib
 import tomli as tomllib
+from pathlib import Path
 from abc import abstractmethod, ABC
+from difflib import SequenceMatcher
 # rick - use strenum here instead, other places will use helper code in manager.py
 from strenum import StrEnum
-from typing import Any, Dict, Optional, Tuple, List, Callable
-
+from typing import Any, Dict, Optional, Tuple, List, Callable, NamedTuple
 from cereal import car
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.kalman.simple_kalman import KF1D, get_kalman_gain
 from openpilot.common.numpy_fast import clip
 from openpilot.common.realtime import DT_CTRL
-from openpilot.selfdrive.car import apply_hysteresis, gen_empty_fingerprint, scale_rot_inertia, scale_tire_stiffness, STD_CARGO_KG
+from openpilot.selfdrive.car import apply_hysteresis, gen_empty_fingerprint, scale_rot_inertia, scale_tire_stiffness,STD_CARGO_KG
 from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, get_friction
 from openpilot.selfdrive.controls.lib.events import Events
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
 from openpilot.common.params import Params
+from openpilot.common.swaglog import cloudlog
 
 ButtonType = car.CarState.ButtonEvent.Type
 GearShifter = car.CarState.GearShifter
 EventName = car.CarEvent.EventName
-TorqueFromLateralAccelCallbackType = Callable[[float, car.CarParams.LateralTorqueTuning, float, float, bool], float]
 
 MAX_CTRL_SPEED = (V_CRUISE_MAX + 4) * CV.KPH_TO_MS
 ACCEL_MAX = 2.0
 ACCEL_MIN = -3.5
 FRICTION_THRESHOLD = 0.3
 
+NEURAL_PARAMS_PATH = os.path.join(BASEDIR, 'selfdrive/car/torque_data/neural_ff_weights.json')
+TORQUE_NN_MODEL_PATH = os.path.join(BASEDIR, 'selfdrive/car/torque_data/lat_models')
 TORQUE_PARAMS_PATH = os.path.join(BASEDIR, 'selfdrive/car/torque_data/params.toml')
 TORQUE_OVERRIDE_PATH = os.path.join(BASEDIR, 'selfdrive/car/torque_data/override.toml')
 TORQUE_SUBSTITUTE_PATH = os.path.join(BASEDIR, 'selfdrive/car/torque_data/substitute.toml')
 
+# dict used to rename activation functions whose names aren't valid python identifiers
+ACTIVATION_FUNCTION_NAMES = {'σ': 'sigmoid'}
 
-def get_torque_params(candidate):
+# 添加 NNFF 日志路径配置
+NNFF_LOG_DIR = "/data/media/0/c2_logs/nnff_log"
+
+def similarity(s1: str, s2: str) -> float:
+  return SequenceMatcher(None, s1, s2).ratio()
+
+class LatControlInputs(NamedTuple):
+  lateral_acceleration: float
+  roll_compensation: float
+  vego: float
+  aego: float
+
+
+TorqueFromLateralAccelCallbackType = Callable[[LatControlInputs, car.CarParams.LateralTorqueTuning, float, float, bool, bool], float]
+
+
+def get_torque_params():
   with open(TORQUE_SUBSTITUTE_PATH, 'rb') as f:
     sub = tomllib.load(f)
-  if candidate in sub:
-    candidate = sub[candidate]
-
   with open(TORQUE_PARAMS_PATH, 'rb') as f:
     params = tomllib.load(f)
   with open(TORQUE_OVERRIDE_PATH, 'rb') as f:
     override = tomllib.load(f)
 
-  # Ensure no overlap
-  if sum([candidate in x for x in [sub, params, override]]) > 1:
-    raise RuntimeError(f'{candidate} is defined twice in torque config')
+  torque_params = {}
+  for candidate in (sub.keys() | params.keys() | override.keys()) - {'legend'}:
+    if sum([candidate in x for x in [sub, params, override]]) > 1:
+      raise RuntimeError(f'{candidate} is defined twice in torque config')
 
-  if candidate in override:
-    out = override[candidate]
-  elif candidate in params:
-    out = params[candidate]
+    sub_candidate = sub.get(candidate, candidate)
+
+    if sub_candidate in override:
+      out = override[sub_candidate]
+    elif sub_candidate in params:
+      out = params[sub_candidate]
+    else:
+      raise NotImplementedError(f"Did not find torque params for {sub_candidate}")
+
+    torque_params[sub_candidate] = {key: out[i] for i, key in enumerate(params['legend'])}
+    if candidate in sub:
+      torque_params[candidate] = torque_params[sub_candidate]
+
+  return torque_params
+
+
+# Twilsonco's Lateral Neural Network Feedforward
+class FluxModel:
+  def __init__(self, params_file, zero_bias=False):
+    with open(params_file, "r") as f:
+      params = json.load(f)
+
+    self.input_size = params["input_size"]
+    self.output_size = params["output_size"]
+    self.input_mean = np.array(params["input_mean"], dtype=np.float32).T
+    self.input_std = np.array(params["input_std"], dtype=np.float32).T
+    self.layers = []
+    self.friction_override = False
+
+    for layer_params in params["layers"]:
+      W = np.array(layer_params[next(key for key in layer_params.keys() if key.endswith('_W'))], dtype=np.float32).T
+      b = np.array(layer_params[next(key for key in layer_params.keys() if key.endswith('_b'))], dtype=np.float32).T
+      if zero_bias:
+        b = np.zeros_like(b)
+      activation = layer_params["activation"]
+      for k, v in ACTIVATION_FUNCTION_NAMES.items():
+        activation = activation.replace(k, v)
+      self.layers.append((W, b, activation))
+
+    self.validate_layers()
+    self.check_for_friction_override()
+
+  # Begin activation functions.
+  # These are called by name using the keys in the model json file
+  @staticmethod
+  def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+  @staticmethod
+  def identity(x):
+    return x
+
+  # End activation functions
+
+  def forward(self, x):
+    for W, b, activation in self.layers:
+      x = getattr(self, activation)(x.dot(W) + b)
+    return x
+
+  def evaluate(self, input_array):
+    in_len = len(input_array)
+    if in_len != self.input_size:
+      # If the input is length 2-4, then it's a simplified evaluation.
+      # In that case, need to add on zeros to fill out the input array to match the correct length.
+      if 2 <= in_len:
+        input_array = input_array + [0] * (self.input_size - in_len)
+      else:
+        raise ValueError(f"Input array length {len(input_array)} must be length 2 or greater")
+
+    input_array = np.array(input_array, dtype=np.float32)
+
+    # Rescale the input array using the input_mean and input_std
+    input_array = (input_array - self.input_mean) / self.input_std
+
+    output_array = self.forward(input_array)
+
+    return float(output_array[0, 0])
+
+  def validate_layers(self):
+    for W, b, activation in self.layers:
+      if not hasattr(self, activation):
+        raise ValueError(f"Unknown activation: {activation}")
+
+  def check_for_friction_override(self):
+    y = self.evaluate([10.0, 0.0, 0.2])
+    self.friction_override = (y < 0.1)
+
+
+def get_nn_model_path(car, eps_firmware) -> Optional[str]:
+  Path(NNFF_LOG_DIR).mkdir(parents=True, exist_ok=True)
+  def check_nn_path(check_model):
+    model_path = None
+    max_similarity = -1.0
+    #cloudlog.info(f"NNFF: 开始搜索模型 - 车型: {check_model}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+    for f in os.listdir(TORQUE_NN_MODEL_PATH):
+      if f.endswith(".json"):
+        model = f.replace(".json", "").replace(f"{TORQUE_NN_MODEL_PATH}/", "")
+        similarity_score = similarity(model, check_model)
+        #cloudlog.debug(f"NNFF 模型匹配度: {model} -> {similarity_score:.3f}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        if similarity_score > max_similarity:
+          max_similarity = similarity_score
+          model_path = os.path.join(TORQUE_NN_MODEL_PATH, f)
+    return model_path, max_similarity
+
+  if len(eps_firmware) > 3:
+    eps_firmware = eps_firmware.replace("\\", "")
+    check_model = f"{car} {eps_firmware}"
+    #cloudlog.info(f"NNFF: 尝试使用带固件版本的模型匹配 - {check_model}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
   else:
-    raise NotImplementedError(f"Did not find torque params for {candidate}")
-  return {key: out[i] for i, key in enumerate(params['legend'])}
+    check_model = car
+    #cloudlog.info(f"NNFF: 使用车型名称匹配 - {check_model}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+
+  model_path, max_similarity = check_nn_path(check_model)
+  if car not in model_path or 0.0 <= max_similarity < 0.9:
+    cloudlog.warning(f"NNFF: 首次匹配失败，尝试仅使用车型名称 - {car}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+    check_model = car
+    model_path, max_similarity = check_nn_path(check_model)
+    if car not in model_path or 0.0 <= max_similarity < 0.9:
+      cloudlog.error(f"NNFF: 模型匹配失败 - 车型: {car}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+      model_path = None
+  else:
+    cloudlog.info(f"NNFF: 模型匹配成功 - 路径: {model_path}, 匹配度: {max_similarity:.3f}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+  return model_path
+
+
+def get_nn_model(car, eps_firmware) -> Optional[FluxModel]:
+  model = get_nn_model_path(car, eps_firmware)
+  if model is not None:
+    model = FluxModel(model)
+  return model
 
 
 # generic car and radar interfaces
@@ -77,17 +220,56 @@ class CarInterfaceBase(ABC):
     self.can_parsers = []
     if CarState is not None:
       self.CS = CarState(CP)
-
       self.cp = self.CS.get_can_parser(CP)
       self.cp_cam = self.CS.get_cam_can_parser(CP)
       self.cp_adas = self.CS.get_adas_can_parser(CP)
       self.cp_body = self.CS.get_body_can_parser(CP)
       self.cp_loopback = self.CS.get_loopback_can_parser(CP)
       self.can_parsers = [self.cp, self.cp_cam, self.cp_adas, self.cp_body, self.cp_loopback]
-
     self.CC = None
     if CarController is not None:
       self.CC = CarController(self.cp.dbc_name, CP, self.VM)
+
+    # NNFF suppprt
+    self.param_s = Params()
+    self._dp_use_nnff = self.param_s.get_bool("dp_use_nnff")  # Twilsonco's Lateral Neural Network Feedforward
+    self._dp_use_nnff_lite = self.param_s.get_bool("dp_use_nnff_lite")
+    # NNFF SUPPORT CHECK
+    eps_firmware = str(next((fw.fwVersion for fw in CP.carFw if fw.ecu == "eps"), ""))
+    comma_nnff_supported = self.check_comma_nn_ff_support(CP.carFingerprint)
+    nnff_supported = self.initialize_lat_torque_nn(CP.carFingerprint, eps_firmware)
+    self.use_nnff = not comma_nnff_supported and nnff_supported and self._dp_use_nnff
+    self.use_nnff_lite = not self.use_nnff and self._dp_use_nnff_lite
+
+  def get_ff_nn(self, x):
+    if not isinstance(x, (list, tuple, np.ndarray)):
+      cloudlog.error("NNFF: 输入数据类型错误", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+      return 0.0
+    if self.lat_torque_nn_model is not None:
+      try:
+        result = self.lat_torque_nn_model.evaluate(x)
+        #cloudlog.debug(f"NNFF 评估: 输入={x}, 输出={result:.6f}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        return result
+      except Exception as e:
+        cloudlog.exception(f"NNFF 评估错误: {str(e)}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        return 0.0
+    return 0.0
+
+  def check_comma_nn_ff_support(self, car):
+    with open(NEURAL_PARAMS_PATH, 'r') as file:
+      data = json.load(file)
+    return car in data
+
+  def initialize_lat_torque_nn(self, car, eps_firmware) -> bool:
+    cloudlog.info(f"NNFF: 开始初始化神经网络模型 - 车型: {car}, EPS固件: {eps_firmware}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+    self.lat_torque_nn_model = get_nn_model(car, eps_firmware)
+    if self.lat_torque_nn_model is not None:
+      cloudlog.info(f"NNFF: 模型初始化成功 - 车型: {car}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+      if hasattr(self.lat_torque_nn_model, 'friction_override'):
+        cloudlog.info(f"NNFF: 摩擦力覆盖状态: {self.lat_torque_nn_model.friction_override}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+    else:
+      cloudlog.warning(f"NNFF: 模型初始化失败 - 车型: {car}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+    return self.lat_torque_nn_model is not None
 
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
@@ -101,7 +283,8 @@ class CarInterfaceBase(ABC):
     return cls.get_params(candidate, gen_empty_fingerprint(), list(), False, False)
 
   @classmethod
-  def get_params(cls, candidate: str, fingerprint: Dict[int, Dict[int, int]], car_fw: List[car.CarParams.CarFw], experimental_long: bool, docs: bool):
+  def get_params(cls, candidate: str, fingerprint: Dict[int, Dict[int, int]], car_fw: List[car.CarParams.CarFw],
+                 experimental_long: bool, docs: bool):
     ret = CarInterfaceBase.get_std_params(candidate)
     ret = cls._get_params(ret, candidate, fingerprint, car_fw, experimental_long, docs)
 
@@ -112,13 +295,23 @@ class CarInterfaceBase(ABC):
     elif dp_lat_controller == 2:  # lqr
       cls.configure_lqr_tune(ret.lateralTuning)
 
+    # Enable torque controller for all cars that do not use angle based steering
+    if ret.steerControlType != car.CarParams.SteerControlType.angle and Params().get("dp_use_nnff"):
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+      eps_firmware = str(next((fw.fwVersion for fw in car_fw if fw.ecu == "eps"), ""))
+      model = get_nn_model_path(candidate, eps_firmware)
+      if model is not None:
+        cloudlog.info(f"NNFF 模型加载成功: {model}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        Params().put("NNFFModelName", candidate.replace("_", " "))
+
     # Vehicle mass is published curb weight plus assumed payload such as a human driver; notCars have no assumed payload
     if not ret.notCar:
       ret.mass = ret.mass + STD_CARGO_KG
 
     # Set params dependent on values set by the car interface
     ret.rotationalInertia = scale_rot_inertia(ret.mass, ret.wheelbase)
-    ret.tireStiffnessFront, ret.tireStiffnessRear = scale_tire_stiffness(ret.mass, ret.wheelbase, ret.centerToFront, ret.tireStiffnessFactor)
+    ret.tireStiffnessFront, ret.tireStiffnessRear = scale_tire_stiffness(ret.mass, ret.wheelbase, ret.centerToFront,
+                                                                         ret.tireStiffnessFactor)
 
     return ret
 
@@ -135,16 +328,19 @@ class CarInterfaceBase(ABC):
   @staticmethod
   def get_steer_feedforward_default(desired_angle, v_ego):
     # Proportional to realigning tire momentum: lateral acceleration.
-    return desired_angle * (v_ego**2)
+    return desired_angle * (v_ego ** 2)
 
   def get_steer_feedforward_function(self):
     return self.get_steer_feedforward_default
 
-  def torque_from_lateral_accel_linear(self, lateral_accel_value: float, torque_params: car.CarParams.LateralTorqueTuning,
-                                       lateral_accel_error: float, lateral_accel_deadzone: float, friction_compensation: bool) -> float:
+  def torque_from_lateral_accel_linear(self, latcontrol_inputs: LatControlInputs,
+                                       torque_params: car.CarParams.LateralTorqueTuning,
+                                       lateral_accel_error: float, lateral_accel_deadzone: float,
+                                       friction_compensation: bool) -> float:
     # The default is a linear relationship between torque and lateral acceleration (accounting for road roll and steering friction)
-    friction = get_friction(lateral_accel_error, lateral_accel_deadzone, FRICTION_THRESHOLD, torque_params, friction_compensation)
-    return (lateral_accel_value / float(torque_params.latAccelFactor)) + friction
+    friction = get_friction(lateral_accel_error, lateral_accel_deadzone, FRICTION_THRESHOLD, torque_params,
+                            friction_compensation)
+    return (latcontrol_inputs.lateral_acceleration / float(torque_params.latAccelFactor)) + friction
 
   def torque_from_lateral_accel(self) -> TorqueFromLateralAccelCallbackType:
     return self.torque_from_lateral_accel_linear
@@ -156,7 +352,7 @@ class CarInterfaceBase(ABC):
     ret.carFingerprint = candidate
 
     # Car docs fields
-    ret.maxLateralAccel = get_torque_params(candidate)['MAX_LAT_ACCEL_MEASURED']
+    ret.maxLateralAccel = get_torque_params()[candidate]['MAX_LAT_ACCEL_MEASURED']
     ret.autoResumeSng = True  # describes whether car can resume from a stop automatically
 
     # standard ALC params
@@ -170,7 +366,7 @@ class CarInterfaceBase(ABC):
     ret.steerRatioRear = 0.  # no rear steering, at least on the listed cars aboveA
     ret.openpilotLongitudinalControl = False
     ret.stopAccel = -2.0
-    ret.stoppingDecelRate = 0.8 # brake_travel/s while trying to stop
+    ret.stoppingDecelRate = 0.8  # brake_travel/s while trying to stop
     ret.vEgoStopping = 0.5
     ret.vEgoStarting = 0.5
     ret.stoppingControl = True
@@ -189,7 +385,7 @@ class CarInterfaceBase(ABC):
 
   @staticmethod
   def configure_torque_tune(candidate, tune, steering_angle_deadzone_deg=0.0, use_steering_angle=True):
-    params = get_torque_params(candidate)
+    params = get_torque_params()[candidate]
 
     tune.init('torque')
     tune.torque.useSteeringAngle = use_steering_angle
@@ -275,7 +471,7 @@ class CarInterfaceBase(ABC):
     if cs_out.seatbeltUnlatched:
       events.add(EventName.seatbeltNotLatched)
     if cs_out.gearShifter != GearShifter.drive and (extra_gears is None or
-       cs_out.gearShifter not in extra_gears):
+                                                    cs_out.gearShifter not in extra_gears):
       events.add(EventName.wrongGear)
     if cs_out.gearShifter == GearShifter.reverse:
       events.add(EventName.reverseGear)
@@ -374,7 +570,7 @@ class CarStateBase(ABC):
     R = 0.3
     A = [[1.0, DT_CTRL], [0.0, 1.0]]
     C = [[1.0, 0.0]]
-    x0=[[0.0], [0.0]]
+    x0 = [[0.0], [0.0]]
     K = get_kalman_gain(DT_CTRL, np.array(A), np.array(C), np.array(Q), R)
     self.v_ego_kf = KF1D(x0=x0, A=A, C=C[0], K=K)
 
@@ -432,7 +628,8 @@ class CarStateBase(ABC):
     self.left_blinker_prev = left_blinker_stalk
     self.right_blinker_prev = right_blinker_stalk
 
-    return bool(left_blinker_stalk or self.left_blinker_cnt > 0), bool(right_blinker_stalk or self.right_blinker_cnt > 0)
+    return bool(left_blinker_stalk or self.left_blinker_cnt > 0), bool(
+      right_blinker_stalk or self.right_blinker_cnt > 0)
 
   @staticmethod
   def parse_gear_shifter(gear: Optional[str]) -> car.CarState.GearShifter:
@@ -451,6 +648,10 @@ class CarStateBase(ABC):
       'B': GearShifter.brake, 'BRAKE': GearShifter.brake,
     }
     return d.get(gear.upper(), GearShifter.unknown)
+
+  @staticmethod
+  def get_can_parser(CP):
+    return None
 
   @staticmethod
   def get_cam_can_parser(CP):
@@ -478,7 +679,10 @@ INTERFACE_ATTR_FILE = {
 
 # rick - modify `Dict[str | StrEnum, Any]` to `Dict[Union[str, StrEnum], Any]` for python 3.8
 from typing import Union
-def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: bool = False) -> Dict[Union[str, StrEnum], Any]:
+
+
+def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: bool = False) -> Dict[
+  Union[str, StrEnum], Any]:
   # read all the folders in selfdrive/car and return a dict where:
   # - keys are all the car models or brand names
   # - values are attr values from all car folders
@@ -486,7 +690,8 @@ def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: boo
   for car_folder in sorted([x[0] for x in os.walk(BASEDIR + '/selfdrive/car')]):
     try:
       brand_name = car_folder.split('/')[-1]
-      brand_values = __import__(f'openpilot.selfdrive.car.{brand_name}.{INTERFACE_ATTR_FILE.get(attr, "values")}', fromlist=[attr])
+      brand_values = __import__(f'openpilot.selfdrive.car.{brand_name}.{INTERFACE_ATTR_FILE.get(attr, "values")}',
+                                fromlist=[attr])
       if hasattr(brand_values, attr) or not ignore_none:
         attr_data = getattr(brand_values, attr, None)
       else:
@@ -502,3 +707,37 @@ def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: boo
       pass
 
   return result
+
+
+class NanoFFModel:
+  def __init__(self, weights_loc: str, platform: str):
+    self.weights_loc = weights_loc
+    self.platform = platform
+    self.load_weights(platform)
+
+  def load_weights(self, platform: str):
+    with open(self.weights_loc) as fob:
+      self.weights = {k: np.array(v) for k, v in json.load(fob)[platform].items()}
+
+  def relu(self, x: np.ndarray):
+    return np.maximum(0.0, x)
+
+  def forward(self, x: np.ndarray):
+    assert x.ndim == 1
+    x = (x - self.weights['input_norm_mat'][:, 0]) / (
+        self.weights['input_norm_mat'][:, 1] - self.weights['input_norm_mat'][:, 0])
+    x = self.relu(np.dot(x, self.weights['w_1']) + self.weights['b_1'])
+    x = self.relu(np.dot(x, self.weights['w_2']) + self.weights['b_2'])
+    x = self.relu(np.dot(x, self.weights['w_3']) + self.weights['b_3'])
+    x = np.dot(x, self.weights['w_4']) + self.weights['b_4']
+    return x
+
+  def predict(self, x: List[float], do_sample: bool = False):
+    x = self.forward(np.array(x))
+    if do_sample:
+      pred = np.random.laplace(x[0], np.exp(x[1]) / self.weights['temperature'])
+    else:
+      pred = x[0]
+    pred = pred * (self.weights['output_norm_mat'][1] - self.weights['output_norm_mat'][0]) + \
+           self.weights['output_norm_mat'][0]
+    return pred

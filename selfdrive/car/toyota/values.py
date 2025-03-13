@@ -30,6 +30,12 @@ class CarControllerParams:
   # Worst case, the low speed limits will allow ~4.0 m/s^3 up (15 deg/s) and ~4.9 m/s^3 down (18 deg/s) at 75 mph,
   # however the EPS has its own internal limits at all speeds which are less than that:
   # Observed internal torque rate limit on TSS 2.5 Camry and RAV4 is ~1500 units/sec up and down when using LTA
+  # 车道追踪辅助（LTA）控制限制
+  # 假设转向比为13.7:
+  # 在75英里/小时的速度下，限制为向上约2.0米/秒^3（7.5度/秒），向下约3.5米/秒^ 3（13度/秒
+  # 在最坏的情况下，低速限制将允许在75英里/小时的速度下向上行驶约4.0米/秒^3（15度/秒），向下行驶约4.9米/秒^ 3（18度/s），
+  # 然而，EPS在所有低于该速度的速度下都有自己的内部限制：
+  # 使用LTA时，TSS 2.5凯美瑞和RAV4上下观察到的内部扭矩率限制约为1500单位/秒
   ANGLE_RATE_LIMIT_UP = AngleRateLimit(speed_bp=[5, 25], angle_v=[0.3, 0.15])
   ANGLE_RATE_LIMIT_DOWN = AngleRateLimit(speed_bp=[5, 25], angle_v=[0.36, 0.26])
 

@@ -103,7 +103,15 @@ class VehicleModel:
       Steering wheel angle [rad]
     """
 
-    return (curv - self.roll_compensation(roll, u)) * self.sR * 1.0 / self.curvature_factor(u)
+    # 优化：添加低速补偿，提高低速转向精度
+    if u < 5.0:  # 低于5m/s时
+      # 低速时增加一点转向角，补偿轮胎滞后效应
+      curv_compensated = curv * (1.0 + 0.15 * (5.0 - u) / 5.0)
+      result = (curv_compensated - self.roll_compensation(roll, u)) * self.sR * 1.0 / self.curvature_factor(u)
+    else:
+      result = (curv - self.roll_compensation(roll, u)) * self.sR * 1.0 / self.curvature_factor(u)
+    
+    return result
 
   def roll_compensation(self, roll: float, u: float) -> float:
     """Calculates the roll-compensation to curvature

@@ -10,7 +10,7 @@ from openpilot.selfdrive.car.interfaces import get_interface_attr
 from openpilot.selfdrive.car.fingerprints import eliminate_incompatible_cars, all_legacy_fingerprint_cars
 from openpilot.selfdrive.car.vin import get_vin, is_valid_vin, VIN_UNKNOWN
 from openpilot.selfdrive.car.fw_versions import get_fw_versions_ordered, get_present_ecus, match_fw_to_car, set_obd_multiplexing
-from openpilot.system.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog
 import cereal.messaging as messaging
 from openpilot.selfdrive.car import gen_empty_fingerprint
 
@@ -128,7 +128,7 @@ def fingerprint(logcan, sendcan, num_pandas):
   dp_car_assigned = Params().get('dp_car_assigned', encoding='utf8')
   if not fixed_fingerprint and dp_car_assigned is not None:
     fixed_fingerprint = dp_car_assigned.strip()
-    skip_fw_query = True
+    #skip_fw_query = True
 
   start_time = time.monotonic()
   if not skip_fw_query:
@@ -152,7 +152,26 @@ def fingerprint(logcan, sendcan, num_pandas):
       # Vin query only reliably works through OBDII
       vin_rx_addr, vin_rx_bus, vin = get_vin(logcan, sendcan, (0, 1))
       ecu_rx_addrs = get_present_ecus(logcan, sendcan, num_pandas=num_pandas)
+      print("ecu_rx_addrs", ecu_rx_addrs)
       car_fw = get_fw_versions_ordered(logcan, sendcan, ecu_rx_addrs, num_pandas=num_pandas)
+
+      def format_car_fw_message(message):
+          formatted_message = {
+              "ecu": message.ecu,
+              "fwVersion": message.fwVersion.decode('ascii', errors='ignore'),
+              "address": message.address,
+              "subAddress": message.subAddress,
+              "responseAddress": message.responseAddress,
+              "request": [req.decode('ascii', errors='ignore') for req in message.request],
+              "brand": message.brand,
+              "bus": message.bus,
+              "logging": message.logging,
+              "obdMultiplexing": message.obdMultiplexing
+          }
+          return formatted_message
+
+      formatted_car_fw = [format_car_fw_message(item) for item in car_fw]
+      print("car_fw", formatted_car_fw)
       cached = False
 
     exact_fw_match, fw_candidates = match_fw_to_car(car_fw)
@@ -200,7 +219,7 @@ def fingerprint(logcan, sendcan, num_pandas):
 def get_car(logcan, sendcan, experimental_long_allowed, num_pandas=1):
   candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(logcan, sendcan, num_pandas)
 
-  if candidate is None:
+  if candidate is None or candidate not in interfaces:
     cloudlog.event("car doesn't match any fingerprints", fingerprints=fingerprints, error=True)
     candidate = "mock"
 

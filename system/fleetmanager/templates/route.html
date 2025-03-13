@@ -1,0 +1,56 @@
+{% extends "layout.html" %}
+
+{% block title %}
+    驾驶数据
+{% endblock %}
+
+{% block main %}
+{% autoescape false %}
+    <br>
+    <h1>行车记录片段（每分钟一段）</h1>
+    <br>
+    <a href="{{ route }}?0,qcamera">全景视角</a> -
+    <a href="{{ route }}?0,fcamera">前视角</a> -
+    <a href="{{ route }}?0,dcamera">驾驶员视角</a> -
+    <a href="{{ route }}?0,ecamera">额外视角</a>
+    <br><br>
+    当前视角: <span id="currentview"></span>
+    <br>
+    当前片段: <span id="currentsegment"></span>
+    <br><br>
+    <video id="video" width="320" height="240" controls autoplay="autoplay" style="background:black">
+    </video>
+    <br><br>
+    <a download="{{ route }}-{{ query_type }}.mp4" href="/footage/full/{{ query_type }}/{{ route }}">下载完整{{ query_type }}视频</a>
+    <br><br>
+    {{ links }}
+    <script>
+    var video = document.getElementById('video');
+    var tracks = {
+      list: [{{ segments  }}],
+      index: {{ query_segment }},
+      next: function() {
+        if (this.index == this.list.length - 1) this.index = 0;
+        else {
+            this.index += 1;
+        }
+      },
+      play: function() {
+        return ( "{{ query_type }}/" + this.list[this.index] );
+      }
+    }
+    video.addEventListener('ended', function(e) {
+      tracks.next();
+      video.src = tracks.play();
+      document.getElementById("currentsegment").textContent=video.src.split("/")[5];
+      document.getElementById("currentview").textContent=video.src.split("/")[4];
+      video.load();
+      video.play();
+    });
+    video.src = tracks.play();
+    document.getElementById("currentsegment").textContent=video.src.split("/")[5];
+    document.getElementById("currentview").textContent=video.src.split("/")[4];
+    </script>
+{% endautoescape %}
+    <br><br>
+{% endblock %}

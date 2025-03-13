@@ -4,7 +4,7 @@ import time
 import numpy as np
 from cereal import log
 from openpilot.common.numpy_fast import clip
-from openpilot.system.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog
 # WARNING: imports outside of constants will not trigger a rebuild
 from openpilot.selfdrive.hybrid_modeld.constants import index_function
 from openpilot.selfdrive.car.interfaces import ACCEL_MIN
@@ -24,20 +24,22 @@ JSON_FILE = os.path.join(LONG_MPC_DIR, "acados_ocp_long.json")
 
 SOURCES = ['lead0', 'lead1', 'cruise', 'e2e']
 
-X_DIM = 3
-U_DIM = 1
-PARAM_DIM = 6
+# 基础配置参数
+X_DIM = 3      # 状态维度：[位置, 速度, 加速度]
+U_DIM = 1      # 控制维度：[加加速度]
+PARAM_DIM = 6  # 参数维度：[最小加速度, 最大加速度, 障碍物位置, 上一次加速度, 跟车时距, 危险系数]
 COST_E_DIM = 5
 COST_DIM = COST_E_DIM + 1
 CONSTR_DIM = 4
 
-X_EGO_OBSTACLE_COST = 3.
-X_EGO_COST = 0.
-V_EGO_COST = 0.
-A_EGO_COST = 0.
-J_EGO_COST = 5.0
-A_CHANGE_COST = 200.
-DANGER_ZONE_COST = 100.
+# 成本函数权重配置
+X_EGO_OBSTACLE_COST = 3.   # 与障碍物距离偏差成本
+X_EGO_COST = 0.           # 位置偏差成本
+V_EGO_COST = 0.           # 速度偏差成本
+A_EGO_COST = 0.           # 加速度偏差成本
+J_EGO_COST = 5.0          # 加加速度成本
+A_CHANGE_COST = 200.      # 加速度变化成本
+DANGER_ZONE_COST = 100.   # 危险区域成本
 CRASH_DISTANCE = .25
 LEAD_DANGER_FACTOR = 0.75
 LIMIT_COST = 1e6
@@ -77,41 +79,79 @@ def get_T_FOLLOW(personality=log.LongitudinalPersonality.standard):
   else:
     raise NotImplementedError("Longitudinal personality not supported")
 
-def get_dynamic_follow(v_ego, personality=log.LongitudinalPersonality.standard):
+def get_dynamic_follow(v_ego, personality=log.LongitudinalPersonality.standard, curvature=0.0, rel_speed=0.0):
+  # 添加对v_ego的边界检查
+  v_ego = max(0.0, min(v_ego, 40.0))  # 限制v_ego在0-40 m/s之间
   if personality==log.LongitudinalPersonality.relaxed:
-    x_vel =  [0,    3.05,   3.61,   4.16,   7.14,   11.11]
-    y_dist = [1.75, 1.75, 1.77, 1.75, 1.8,  1.8]
+    # 调整速度区间使过渡更平滑
+    x_vel =  [0.0,  3.0,  8.0,  13.90,  20,    25,    40]  # m/s
+    y_dist = [1.0,  1.05, 1.15,  1.25,   1.35,  1.55,  1.7] # 秒
   elif personality==log.LongitudinalPersonality.standard:
-    x_vel =  [0,    3.05,   3.61,   4.16,   7.14,   11.11]
-    y_dist = [1.5,  1.5,  1.51,  1.5,  1.5,  1.45]
+    # 调整速度区间使过渡更平滑
+    x_vel =  [0.0,  3.0,  8.0,  13.90,  20,    25,    40]  # m/s
+    y_dist = [0.85, 0.90, 0.95,  1.05,   1.15,  1.25,  1.3] # 秒
   elif personality==log.LongitudinalPersonality.aggressive:
-    x_vel =  [0,    3.05,   3.61,   4.16,   7.14,   11.11]
-    y_dist = [1.12, 1.12, 1.13, 1.12, 1.22, 1.22]
+    # 调整速度区间使过渡更平滑
+    x_vel =  [0.0,  4.00, 8.0,  13.89,  20,    25,    40]  # m/s
+    y_dist = [0.65, 0.70, 0.75,  0.80,   0.85,  0.95,  1.0] # 秒
   else:
     raise NotImplementedError("Dynamic Follow personality not supported")
-  return np.interp(v_ego, x_vel, y_dist)
+  # 基础跟车时距
+  base_t_follow = np.interp(v_ego, x_vel, y_dist)
+  # 道路曲率因素：弯道增加跟车距离
+  curve_factor = np.clip(1.0 + abs(curvature) * 50.0, 1.0, 1.3)
+  # 相对速度因素：
+  # - 如果前车减速(rel_speed < 0)，增加跟车距离
+  # - 如果前车加速(rel_speed > 0)，适当减少跟车距离
+  rel_speed_factor = np.clip(1.0 - rel_speed * 0.15, 0.85, 1.25)
+  # 天气因素(可选，这里默认为正常天气)
+  weather_factor = 1.0
+  # 综合计算最终跟车时距
+  final_t_follow = base_t_follow * curve_factor * rel_speed_factor * weather_factor
+  return np.clip(final_t_follow, 0.5, 2.5)  # 确保时距在安全范围内
 
 def get_stopped_equivalence_factor(v_lead):
   return (v_lead**2) / (2 * COMFORT_BRAKE)
 
+# 获取安全障碍物距离
 def get_safe_obstacle_distance(v_ego, t_follow):
   return (v_ego**2) / (2 * COMFORT_BRAKE) + t_follow * v_ego + STOP_DISTANCE
 
-def desired_follow_distance(v_ego, v_lead, t_follow=None):
-  if t_follow is None:
-    t_follow = get_T_FOLLOW()
+# 期望跟车距离
+def desired_follow_distance(v_ego, v_lead, t_follow=get_T_FOLLOW()):
   return get_safe_obstacle_distance(v_ego, t_follow) - get_stopped_equivalence_factor(v_lead)
 
 def get_stopped_equivalence_factor_krkeegen(v_lead, v_ego):
-  # KRKeegan this offset rapidly decreases the following distance when the lead pulls
-  # away, resulting in an early demand for acceleration.
-  v_diff_offset = 0
-  if np.all(v_lead - v_ego > 0):
-    v_diff_offset = ((v_lead - v_ego) * 1.)
-    v_diff_offset = np.clip(v_diff_offset, 0, STOP_DISTANCE / 2)
-    v_diff_offset = np.maximum(v_diff_offset * ((10 - v_ego)/10), 0)
-  distance = (v_lead**2) / (2 * COMFORT_BRAKE) + v_diff_offset
-  return distance
+    """优化的停车等效距离计算
+    考虑相对速度和当前速度的动态影响
+    """
+    v_diff = v_lead - v_ego
+    v_diff_offset = 0
+
+    if np.all(v_diff > 0):
+        # 动态速度因子：高速时更保守，低速时更积极
+        speed_factor = np.clip(1.0 - (v_ego / 20.0), 0.2, 1.0)
+
+        # 相对速度影响：速度差越大，反应越积极
+        rel_speed_factor = np.clip(v_diff / 5.0, 0.0, 1.0)
+
+        # 计算偏移量
+        v_diff_offset = v_diff * speed_factor * rel_speed_factor
+
+        # 根据当前速度动态调整最大偏移量
+        max_offset = STOP_DISTANCE * (0.7 - v_ego * 0.02)  # 速度越高，允许的偏移量越小
+        v_diff_offset = np.clip(v_diff_offset, 0, max_offset)
+
+        # 平滑加速响应
+        v_diff_offset = np.maximum(v_diff_offset * ((10 - v_ego)/10), 0)
+
+    # 基础制动距离
+    base_distance = (v_lead**2) / (2 * COMFORT_BRAKE)
+
+    # 高速安全裕度
+    safety_margin = np.clip(v_ego * 0.1, 0.0, 2.0)
+
+    return base_distance + v_diff_offset + safety_margin
 
 def gen_long_model():
   model = AcadosModel()
@@ -245,6 +285,10 @@ def gen_long_ocp():
 
 class LongitudinalMpc:
   def __init__(self, mode='acc'):
+    """初始化纵向MPC控制器
+        参数:
+        - mode: 控制模式('acc'巡航控制/'blended'混合控制)
+    """
     self.mode = mode
     self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
     self.reset()
@@ -355,10 +399,25 @@ class LongitudinalMpc:
     self.max_a = max_a
 
   # def update(self, radarstate, v_cruise, x, v, a, j, personality=log.LongitudinalPersonality.standard):
-  def update(self, radarstate, v_cruise, x, v, a, j, personality=log.LongitudinalPersonality.standard, use_df_tune=False, use_krkeegen_tune=False):
+  def update(self,carstate, radarstate, v_cruise, x, v, a, j, personality=log.LongitudinalPersonality.standard, use_df_tune=False, use_krkeegen_tune=False):
+    """更新MPC控制器状态
+        
+        参数:
+        - carstate: 车辆状态
+        - radarstate: 雷达状态
+        - v_cruise: 巡航目标速度
+        - x,v,a,j: 规划轨迹
+        - personality: 驾驶风格
+        - use_df_tune: 是否使用动态跟车调整
+        - use_krkeegen_tune: 是否使用优化的停车距离计算
+    """
     # t_follow = get_T_FOLLOW(personality)
     v_ego = self.x0[1]
-    t_follow = get_T_FOLLOW(personality) if not use_df_tune else get_dynamic_follow(v_ego, personality)
+    # 计算相对速度和道路曲率
+    rel_speed = radarstate.leadOne.vRel if hasattr(radarstate.leadOne, 'status') and radarstate.leadOne.status else 0.0
+    curvature = abs(carstate.steeringAngleDeg * 0.017453292519943295) / (max(v_ego, 1.0) * 2.5)
+    # 获取动态跟车时距
+    t_follow = get_T_FOLLOW(personality) if not use_df_tune else get_dynamic_follow(v_ego, personality, curvature,                                                                            rel_speed)
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status
 
     lead_xv_0 = self.process_lead(radarstate.leadOne)
@@ -367,10 +426,13 @@ class LongitudinalMpc:
     # To estimate a safe distance from a moving lead, we calculate how much stopping
     # distance that lead needs as a minimum. We can add that to the current distance
     # and then treat that as a stopped car/obstacle at this new distance.
+    # 计算安全距离
     if use_krkeegen_tune:
+      # 使用优化的停车距离计算
       lead_0_obstacle = lead_xv_0[:,0] + get_stopped_equivalence_factor_krkeegen(lead_xv_0[:,1], v_ego)
       lead_1_obstacle = lead_xv_1[:,0] + get_stopped_equivalence_factor_krkeegen(lead_xv_1[:,1], v_ego)
     else:
+      # 使用标准停车距离计算
       lead_0_obstacle = lead_xv_0[:,0] + get_stopped_equivalence_factor(lead_xv_0[:,1])
       lead_1_obstacle = lead_xv_1[:,0] + get_stopped_equivalence_factor(lead_xv_1[:,1])
 

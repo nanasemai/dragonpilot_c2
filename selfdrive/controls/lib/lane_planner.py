@@ -1,22 +1,17 @@
-'''
-This is the lane_planner from 0.8.16
-
-reason I keep this as a separate file is that Nuclear Grade model released during 0.8.15 / 0.8.16.
-So it could handle better with old planners.
-
-Note 1: This may not work in newer version.
-
-'''
+#This is the lane_planner from 0.8.16
+#reason I keep this as a separate file is that Nuclear Grade model released during 0.8.15 / 0.8.16.
+#So it could handle better with old planners.
+#Note 1: This may not work in newer version.
 
 import numpy as np
 from cereal import log
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.numpy_fast import interp
 from openpilot.common.realtime import DT_MDL
-from openpilot.system.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.hardware import EON
 
-
+# 轨迹预测点数量
 TRAJECTORY_SIZE = 33
 # camera offset is meters from center car to camera
 # model path is in the frame of the camera

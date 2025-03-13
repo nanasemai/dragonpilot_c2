@@ -68,3 +68,22 @@ void cloudlog_te(int levelnum, const char* filename, int lineno, const char* fun
 #define LOG_100(fmt, ...) cloudlog_rl(2, 100, CLOUDLOG_INFO, fmt, ## __VA_ARGS__)
 #define LOGW_100(fmt, ...) cloudlog_rl(2, 100, CLOUDLOG_WARNING, fmt, ## __VA_ARGS__)
 #define LOGE_100(fmt, ...) cloudlog_rl(2, 100, CLOUDLOG_ERROR, fmt, ## __VA_ARGS__)
+
+
+// 添加模块上下文支持
+void cloudlog_bind(const char* key, const char* value);
+
+// 添加新的带上下文的日志函数
+void cloudlog_ec(int levelnum, const char* filename, int lineno, const char* func,
+                const char* fmt, ...) /*__attribute__ ((format (printf, 6, 7)))*/;
+
+// 新增带上下文的宏定义
+#define cloudlog_c(lvl, fmt, ...) cloudlog_ec(lvl, __FILE__, __LINE__, \
+                                           __func__, \
+                                           fmt, ## __VA_ARGS__)
+
+// 新增便捷宏
+#define LOGD_C(fmt, ...) cloudlog_c(CLOUDLOG_DEBUG, fmt, ## __VA_ARGS__)
+#define LOG_C(fmt, ...) cloudlog_c(CLOUDLOG_INFO, fmt, ## __VA_ARGS__)
+#define LOGW_C(fmt, ...) cloudlog_c(CLOUDLOG_WARNING, fmt, ## __VA_ARGS__)
+#define LOGE_C(fmt, ...) cloudlog_c(CLOUDLOG_ERROR, fmt, ## __VA_ARGS__)

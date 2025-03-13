@@ -5,8 +5,7 @@ import datetime
 
 from openpilot.common.params import Params
 from openpilot.system.hardware.eon.hardware import getprop
-from openpilot.system.swaglog import cloudlog
-
+from openpilot.common.swaglog import cloudlog
 def main():
   prev = b""
   params = Params()
@@ -20,7 +19,7 @@ def main():
       # 0 for shutdown, 1 for reboot
       prop = getprop("sys.shutdown.requested")
       if prop is not None and len(prop) > 0:
-        # os.system("pkill -9 loggerd")
+        os.system("pkill -9 loggerd")
         params.put("LastSystemShutdown", f"'{prop}' {datetime.datetime.now()}")
         os.sync()
 

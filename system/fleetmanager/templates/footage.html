@@ -1,0 +1,34 @@
+{% extends "layout.html" %}
+
+{% block title %}
+    驾驶数据
+{% endblock %}
+
+{% block main %}
+    <br>
+    <h1>驾驶数据</h1>
+    <br>
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead class="table-light">
+                <tr>
+                    <th>时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                    <tr>
+                        <td>{{ row }}</td>
+                        <td>
+                            <div class="btn-group" role="group">
+                                <a href="footage/{{ row }}" class="btn btn-outline-primary btn-sm">查看片段</a>
+                                <a href="footage/full/qcamera/{{ row }}" class="btn btn-outline-success btn-sm">完整视频</a>
+                            </div>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}

@@ -6,7 +6,7 @@ from typing import Optional
 
 import cereal.messaging as messaging
 from openpilot.common.realtime import set_core_affinity, set_realtime_priority
-from openpilot.system.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog
 
 
 MAX_MODEM_CRASHES = 3

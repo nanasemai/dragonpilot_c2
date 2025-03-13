@@ -4,12 +4,14 @@ from panda import Panda
 from panda.python import uds
 from openpilot.selfdrive.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerParams, TSS2_CAR, RADAR_ACC_CAR, NO_DSU_CAR, \
                                         MIN_ACC_SPEED, EPS_SCALE, UNSUPPORTED_DSU_CAR, NO_STOP_TIMER_CAR, ANGLE_CONTROL_CAR
-from openpilot.selfdrive.car import get_safety_config
+from openpilot.selfdrive.car import create_button_events, get_safety_config
 from openpilot.selfdrive.car.disable_ecu import disable_ecu
 from openpilot.selfdrive.car.interfaces import CarInterfaceBase
 
+# dp
 from openpilot.common.params import Params
 
+ButtonType = car.CarState.ButtonEvent.Type
 EventName = car.CarEvent.EventName
 SteerControlType = car.CarParams.SteerControlType
 
@@ -48,6 +50,18 @@ class CarInterface(CarInterfaceBase):
 
     ret.dashcamOnly = False if ret.dashcamOnly and Params().get_bool("dp_car_dashcam_mode_removal") else ret.dashcamOnly
 
+    # Detect smartDSU, which intercepts ACC_CMD from the DSU (or radar) allowing openpilot to send it
+    # 0x2AA is sent by a similar device which intercepts the radar instead of DSU on NO_DSU_CARs
+    if 0x2FF in fingerprint[0] or (0x2AA in fingerprint[0] and candidate in NO_DSU_CAR):
+      ret.flags |= ToyotaFlags.SMART_DSU.value
+
+    if 0x2AA in fingerprint[0] and candidate in NO_DSU_CAR:
+      ret.flags |= ToyotaFlags.RADAR_CAN_FILTER.value
+
+    # In TSS2 cars, the camera does long control
+    found_ecus = [fw.ecu for fw in car_fw]
+    ret.enableDsu = len(found_ecus) > 0 and Ecu.dsu not in found_ecus and candidate not in (NO_DSU_CAR | UNSUPPORTED_DSU_CAR) \
+                    and not (ret.flags & ToyotaFlags.SMART_DSU)
     if candidate == CAR.PRIUS:
       stop_and_go = True
       ret.wheelbase = 2.70
@@ -210,33 +224,19 @@ class CarInterface(CarInterfaceBase):
     # Detect flipped signals and enable for C-HR and others
     ret.enableBsm = 0x3F6 in fingerprint[0] and candidate in TSS2_CAR
 
-    # Detect smartDSU, which intercepts ACC_CMD from the DSU (or radar) allowing openpilot to send it
-    # 0x2AA is sent by a similar device which intercepts the radar instead of DSU on NO_DSU_CARs
-    if 0x2FF in fingerprint[0] or (0x2AA in fingerprint[0] and candidate in NO_DSU_CAR):
-      ret.flags |= ToyotaFlags.SMART_DSU.value
-
     # No radar dbc for cars without DSU which are not TSS 2.0
     # TODO: make an adas dbc file for dsu-less models
     ret.radarUnavailable = DBC[candidate]['radar'] is None or candidate in (NO_DSU_CAR - TSS2_CAR)
-
-    # In TSS2 cars, the camera does long control
-    found_ecus = [fw.ecu for fw in car_fw]
-    ret.enableDsu = len(found_ecus) > 0 and Ecu.dsu not in found_ecus and candidate not in (NO_DSU_CAR | UNSUPPORTED_DSU_CAR) \
-                                        and not (ret.flags & ToyotaFlags.SMART_DSU)
-    ret.enableGasInterceptor = 0x201 in fingerprint[0]
-
-    if ret.enableGasInterceptor:
-      ret.safetyConfigs[0].safetyParam |= Panda.FLAG_TOYOTA_GAS_INTERCEPTOR
 
     # if the smartDSU is detected, openpilot can send ACC_CONTROL and the smartDSU will block it from the DSU or radar.
     # since we don't yet parse radar on TSS2/TSS-P radar-based ACC cars, gate longitudinal behind experimental toggle
     use_sdsu = bool(ret.flags & ToyotaFlags.SMART_DSU)
     if candidate in (RADAR_ACC_CAR | NO_DSU_CAR):
-      ret.experimentalLongitudinalAvailable = use_sdsu
+      ret.experimentalLongitudinalAvailable = use_sdsu or candidate in RADAR_ACC_CAR
 
       if not use_sdsu:
         # Disabling radar is only supported on TSS2 radar-ACC cars
-        if experimental_long and candidate in RADAR_ACC_CAR and Params().get_bool("dp_toyota_tss2_radar_disabled"):  # TODO: disabling radar isn't supported yet
+        if experimental_long and candidate in RADAR_ACC_CAR:
           ret.flags |= ToyotaFlags.DISABLE_RADAR.value
       else:
         use_sdsu = use_sdsu and experimental_long
@@ -251,31 +251,34 @@ class CarInterface(CarInterfaceBase):
     #  - TSS-P DSU-less cars w/ CAN filter installed (no radar parser yet)
     ret.openpilotLongitudinalControl = use_sdsu or ret.enableDsu or candidate in (TSS2_CAR - RADAR_ACC_CAR) or bool(ret.flags & ToyotaFlags.DISABLE_RADAR.value)
     ret.autoResumeSng = ret.openpilotLongitudinalControl and candidate in NO_STOP_TIMER_CAR
+    ret.enableGasInterceptor = 0x201 in fingerprint[0] and ret.openpilotLongitudinalControl
 
     if not ret.openpilotLongitudinalControl:
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_TOYOTA_STOCK_LONGITUDINAL
+
+    if ret.enableGasInterceptor:
+      ret.safetyConfigs[0].safetyParam |= Panda.FLAG_TOYOTA_GAS_INTERCEPTOR
 
     # min speed to enable ACC. if car can do stop and go, then set enabling speed
     # to a negative value, so it won't matter.
     ret.minEnableSpeed = -1. if (stop_and_go or ret.enableGasInterceptor) else MIN_ACC_SPEED
 
+    # on stock Toyota this is -2.5
+    ret.stopAccel = -2.5
+
     tune = ret.longitudinalTuning
-    tune.deadzoneBP = [0., 9.]
-    tune.deadzoneV = [.0, .15]
-    if candidate in TSS2_CAR or ret.enableGasInterceptor:
-      tune.kpBP = [0., 5., 20.]
-      tune.kpV = [1.3, 1.0, 0.7]
-      tune.kiBP = [0., 5., 12., 20., 27.]
-      tune.kiV = [.35, .23, .20, .17, .1]
-      if candidate in TSS2_CAR:
-        ret.vEgoStopping = 0.25
-        ret.vEgoStarting = 0.25
-        ret.stoppingDecelRate = 0.3  # reach stopping target smoothly
-    else:
-      tune.kpBP = [0., 5., 35.]
-      tune.kiBP = [0., 35.]
-      tune.kpV = [3.6, 2.4, 1.5]
-      tune.kiV = [0.54, 0.36]
+    tune.deadzoneBP = [0., 16., 20., 30.]
+    tune.deadzoneV = [.04, .05, .08, .15]
+    ret.stoppingDecelRate = 0.17  # This is okay for TSS-P
+    if candidate in TSS2_CAR:
+      ret.vEgoStopping = 0.25
+      ret.vEgoStarting = 0.25
+      ret.stoppingDecelRate = max(0.009, ret.stoppingDecelRate)  # 确保减速率不会太小
+      ret.stopAccel = min(-2.0, ret.stopAccel)  # 确保停车加速度不会太大
+    tune.kpBP = [0., 5.]
+    tune.kpV = [0.8, 1.]
+    tune.kiBP = [0., 5.]
+    tune.kiV = [0.3, 1.]
 
     return ret
 
@@ -289,6 +292,9 @@ class CarInterface(CarInterfaceBase):
   # returns a car.CarState
   def _update(self, c):
     ret = self.CS.update(self.cp, self.cp_cam)
+
+    if self.CP.carFingerprint in (TSS2_CAR - RADAR_ACC_CAR) or (self.CP.flags & ToyotaFlags.SMART_DSU and not self.CP.flags & ToyotaFlags.RADAR_CAN_FILTER):
+      ret.buttonEvents = create_button_events(self.CS.distance_button, self.CS.prev_distance_button, {1: ButtonType.gapAdjustCruise})
 
     # events
     events = self.create_common_events(ret)

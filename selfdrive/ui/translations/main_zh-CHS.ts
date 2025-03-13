@@ -108,6 +108,26 @@
         <source>LIMIT</source>
         <translation>LIMIT</translation>
     </message>
+    <message>
+        <source>RPM</source>
+        <translation>转速</translation>
+    </message>
+    <message>
+        <source>REAL-TIME</source>
+        <translation>实时</translation>
+    </message>
+    <message>
+        <source>MONITORING</source>
+        <translation>监控</translation>
+    </message>
+    <message>
+        <source>SYSTEM</source>
+        <translation>系统</translation>
+    </message>
+    <message>
+        <source>STATUS</source>
+        <translation>状态</translation>
+    </message>
 </context>
 <context>
     <name>C2NetworkPanel</name>
@@ -147,7 +167,70 @@
     </message>
 </context>
 <context>
+    <name>DeviceState</name>
+    <message>
+        <source>Error</source>
+        <translation>错误</translation>
+    </message>
+    <message>
+        <source>Waiting</source>
+        <translation>等待中</translation>
+    </message>
+    <message>
+        <source>Warning</source>
+        <translation>警告</translation>
+    </message>
+</context>
+<context>
     <name>DPCtrlPanel</name>
+    <message>
+        <source>NNFF Status</source>
+        <translation>NNFF状态</translation>
+    </message>
+    <message>
+        <source>Supported Model: </source>
+        <translation>支持的车型: </translation>
+    </message>
+    <message>
+        <source>Current car model does not support NNFF</source>
+        <translation>当前车型不支持NNFF</translation>
+    </message>
+    <message>
+        <source>Not Supported</source>
+        <translation>不支持</translation>
+    </message>
+    <message>
+        <source>ROW</source>
+        <translation>行</translation>
+    </message>
+    <message>
+        <source>COLUMN</source>
+        <translation>列</translation>
+    </message>
+    <message>
+        <source>ALL</source>
+        <translation>全部</translation>
+    </message>
+    <message>
+        <source>Off</source>
+        <translation>关闭</translation>
+    </message>
+    <message>
+        <source>Reset Configuration</source>
+        <translation>重置配置</translation>
+    </message>
+    <message>
+        <source>RESET</source>
+        <translation>重置</translation>
+    </message>
+    <message>
+        <source>Are you sure you want to reset all dp configurations?</source>
+        <translation>您确定要重置所有dp配置吗？</translation>
+    </message>
+    <message>
+        <source>Reset</source>
+        <translation>重置</translation>
+    </message>
     <message>
         <source>Ctrl - Overall</source>
         <translation>控制 - 整体</translation>
@@ -165,6 +248,14 @@ Reboot required.</source>
 行车记录仪模式通常意味着您的车辆未得到完全支持。
 使用风险自负！
 需要重新启动。</translation>
+    </message>
+    <message>
+        <source>Developer UI</source>
+        <translation>开发者UI</translation>
+    </message>
+    <message>
+        <source>Display real-time parameters and metrics from various sources.</source>
+        <translation>显示来自各种来源的实时参数和指标。</translation>
     </message>
     <message>
         <source>Ctrl - Lateral</source>
@@ -189,28 +280,88 @@ Reboot required.</source>
         <translation>当启用时，openpilot将使用车道线进行横向控制，在车道线概率较低时自动切换至无车道线模式。</translation>
     </message>
     <message>
+        <source>Neural Network Feedforward (NNFF)</source>
+        <translation>前馈神经网络控制器(NNFF)</translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will use Twilsonco Neural Network FeedForward for more precise steering control.</source>
+        <translation>启用后，openpilot 将使用 Twilsonco 神经网络前馈实现更精确的转向控制。</translation>
+    </message>
+    <message>
+        <source>Enforce Torque Lateral Control</source>
+        <translation>强制扭矩横向控制</translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will use enforce steer with Torque lateral control.</source>
+        <translation>启用后，openpilot 将使用扭矩横向控制强制转向。</translation>
+    </message>
+    <message>
+        <source>ALC RoadEdge Detection</source>
+        <translation>启用道路边缘检测</translation>
+    </message>
+    <message>
+        <source>Enabling this will prevent lane change when you are too close to road edge.
+The values will be used live when lane change assistance is enabled.</source>
+        <translation>启用此功能将防止在离道路边缘太近时变道。
+这个选项只有在开启辅助变道时才有效果。</translation>
+    </message>
+    <message>
+        <source>ALC Detection Block Assist</source>
+        <translation>变道有风险暂停辅助</translation>
+    </message>
+    <message>
+        <source>Enabling this will block land change assist when detected road edge or blindspot.
+The values will be used live when lane change assistance is enabled.</source>
+        <translation>启用其功能，当检测到离道路边缘太近或者盲区有车辆时会暂停辅助变道。
+这个选项只有在开启辅助变道时才有效果。</translation>
+    </message>
+    <message>
+        <source>Manual Real-Time Tuning</source>
+        <translation>手动扭矩横向控制器</translation>
+    </message>
+    <message>
+        <source>Enforces the torque lateral controller to use the fixed values instead of the learned values from Self-Tune. Enabling this toggle overrides Self-Tune values.</source>
+        <translation>强制扭矩横向控制器使用固定值，而不是从自整定中学习到的值。启用此切换将覆盖自整定值。</translation>
+    </message>
+    <message>
+        <source>Torque Max Lateral Acceleration</source>
+        <translation>手动设置扭矩最大横向加速度</translation>
+    </message>
+    <message>
+        <source>Adjust Max Lateral Acceleration for the Torque Lateral Controller.</source>
+        <translation>调整扭矩横向控制器的最大横向加速度。数值在1~500个单位内,默认250单位</translation>
+    </message>
+    <message>
+        <source>Torque Friction</source>
+        <translation>手动设置摩擦力</translation>
+    </message>
+    <message>
+        <source>Adjust Friction for the Torque Lateral Controller.</source>
+        <translation>调整扭矩横向控制器的摩擦力。数值在1~50个单位内,默认1个单位</translation>
+    </message>
+    <message>
+        <source> UNIT</source>
+        <translation> 单位</translation>
+    </message>
+    <message>
         <source>Lane Change Assist Activate Speed</source>
-        <translation>车道变换辅助激活速度</translation>
+        <translation>辅助车道变换速度设定</translation>
     </message>
     <message>
         <source>Adjust the lane change assist activate speed.
 Off = Disable lane change assistance.
 1 mph = 1.6 kph</source>
-        <translation>调整车道变换辅助激活速度。
+        <translation>调整辅助车道变换激活速度。
 关闭 = 禁用车道变换辅助。
 1 英里/时 = 1.6 公里/时</translation>
     </message>
     <message>
         <source> mph</source>
-        <translation> 英里每小时</translation>
-    </message>
-    <message>
-        <source>Off</source>
-        <translation>关闭</translation>
+        <translation> 英里/时</translation>
     </message>
     <message>
         <source>Only When Drive Above</source>
-        <translation>仅当车辆行驶速度高于</translation>
+        <translation>车道线优先模式启用速度</translation>
     </message>
     <message>
         <source>All Speed - Use Lane Line when available.
@@ -300,6 +451,27 @@ Note: YOUR DRIVING ROUTE DATA WILL BE UPLOADED to openstreetmap server to help t
 Reboot required.</source>
         <translation>启用后，openpilot将在屏幕上显示当前道路名称和限速。
 注意：您的驾驶路线数据将被上传到openstreetmap服务器，以帮助提高地图的准确性。
+需要重新启动。</translation>
+    </message>
+    <message>
+        <source>Enable GPS Logger</source>
+        <translation>启用GPS轨迹记录到GPX文件</translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will store your track in /data/media/0/gpx_logs/.
+Reboot required.</source>
+        <translation>启用后，openpilot会把你的GPS轨迹记录到/data/media/0/gpx_logs/里面，您可以使用路书软件查看轨迹。
+需要重新启动。</translation>
+    </message>
+    <message>
+        <source>Enable Drive Data Upload</source>
+        <translation>启用上传驾驶数据(显示里程)</translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will upload your driving data.
+If disabled, none of your driving data will be uploaded.
+Reboot required.</source>
+        <translation>启用后，openpilot上传你的驾驶数据。禁用则不会上传。此选项可以用于展示里程信息
 需要重新启动。</translation>
     </message>
     <message>
@@ -523,22 +695,6 @@ Reboot Required.</source>
 需要重新启动。</translation>
     </message>
     <message>
-        <source>Reset Configuration</source>
-        <translation>重置配置</translation>
-    </message>
-    <message>
-        <source>RESET</source>
-        <translation>重置</translation>
-    </message>
-    <message>
-        <source>Are you sure you want to reset all dp configurations?</source>
-        <translation>您确定要重置所有dp配置吗？</translation>
-    </message>
-    <message>
-        <source>Reset</source>
-        <translation>重置</translation>
-    </message>
-    <message>
         <source>On-Road</source>
         <translation>On-Road</translation>
     </message>
@@ -577,6 +733,22 @@ OP - 当 OP 功能启用时，显示将关闭（不包括警示）。
         <translation>启用后，当领先车辆在70公里/小时以上行驶时失踪超过2秒时，openpilot将警告驾驶员。</translation>
     </message>
     <message>
+        <source>Green Light Alert</source>
+        <translation>红灯提醒</translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will alert driver the light turn green.</source>
+        <translation>启用后，openpilot 将在灯变绿时提醒驾驶员。</translation>
+    </message>
+    <message>
+        <source>Lead Departed Alert</source>
+        <translation>前车起步提醒</translation>
+    </message>
+    <message>
+        <source>When enabled, openpilot will alert driver when a lead vehicle departing while waiting at traffic lights.</source>
+        <translation>启用后，当领头车辆在红绿灯处等待出发时，openpilot 会提醒驾驶员。</translation>
+    </message>
+    <message>
         <source>Display Flight Panel</source>
         <translation>显示飞行面板</translation>
     </message>
@@ -605,15 +777,14 @@ Reboot required.</source>
 需要重新启动。</translation>
     </message>
     <message>
-        <source>Enable File server</source>
-        <translation>开启文件服务器</translation>
+        <source>Enable Fleet File server</source>
+        <translation>开启Fleet文件服务器</translation>
     </message>
     <message>
-        <source>When enabled, you will be able to access log data using browser
-through port 9000.
+        <source>When enabled, you will be able to access data using browser through port 5050.
 Needs to be on the same network.(e.g.LAN)
 Reboot required.</source>
-        <translation>启用后，您将能够通过端口9000使用浏览器访问日志数据。
+        <translation>启用后，您将能够通过端口5050使用浏览器访问数据(Dashcam,错误日志,GPX文件,行车记录仪文件)
 需要在同一网络上。（例如LAN）
 需要重新启动。</translation>
     </message>
@@ -626,8 +797,7 @@ Reboot required.</source>
         <translation>开启Otisserv服务</translation>
     </message>
     <message>
-        <source>When enabled, you will be able to access some features remotely
-through drangonpilot.org.</source>
+        <source>When enabled, you will be able to access some features remotely through drangonpilot.org.</source>
         <translation>启用后，您将能够通过drangonpilot.org远程访问某些功能。</translation>
     </message>
     <message>
@@ -1235,7 +1405,7 @@ This may take up to a minute.</source>
     </message>
     <message>
         <source>Toggles</source>
-        <translation>设定</translation>
+        <translation>OP设置</translation>
     </message>
     <message>
         <source>Software</source>
@@ -1248,6 +1418,14 @@ This may take up to a minute.</source>
     <message>
         <source>[AUTO SELECT]</source>
         <translation>[自动选择]</translation>
+    </message>
+    <message>
+        <source>DPConfig</source>
+        <translation>DP设置</translation>
+    </message>
+    <message>
+        <source>DriveStats</source>
+        <translation>里程</translation>
     </message>
 </context>
 <context>
@@ -1348,7 +1526,7 @@ This may take up to a minute.</source>
     <name>Sidebar</name>
     <message>
         <source>CONNECT</source>
-        <translation>连接</translation>
+        <translation>云服务</translation>
     </message>
     <message>
         <source>OFFLINE</source>

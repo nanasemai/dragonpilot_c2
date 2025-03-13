@@ -36,10 +36,10 @@ from openpilot.common.file_helpers import CallbackReader
 from openpilot.common.params import Params
 from openpilot.common.realtime import set_core_affinity
 from openpilot.system.hardware import HARDWARE, PC, AGNOS
-from openpilot.system.loggerd.config import ROOT
-from openpilot.system.loggerd.xattr_cache import getxattr, setxattr
+from openpilot.selfdrive.loggerd.config import ROOT
+from openpilot.selfdrive.loggerd.xattr_cache import getxattr, setxattr
 from openpilot.selfdrive.statsd import STATS_DIR
-from openpilot.system.swaglog import SWAGLOG_DIR, cloudlog
+from openpilot.common.swaglog import SWAGLOG_DIR, cloudlog
 from openpilot.system.version import get_commit, get_origin, get_short_branch, get_version
 
 
@@ -590,8 +590,10 @@ def get_logs_to_send_sorted() -> List[str]:
 
 def log_handler(end_event: threading.Event) -> None:
   if PC:
+    cloudlog.warning("log_handler 在PC环境下不上传日志")
     return
 
+  cloudlog.info("log_handler 启动")
   log_files = []
   last_scan = 0.
   while not end_event.is_set():
@@ -599,81 +601,104 @@ def log_handler(end_event: threading.Event) -> None:
       curr_scan = time.monotonic()
       if curr_scan - last_scan > 10:
         log_files = get_logs_to_send_sorted()
+        cloudlog.debug(f"log_handler 扫描到 {len(log_files)} 个日志文件待上传")
         last_scan = curr_scan
 
       # send one log
       curr_log = None
       if len(log_files) > 0:
         log_entry = log_files.pop() # newest log file
-        cloudlog.debug(f"athena.log_handler.forward_request {log_entry}")
+        cloudlog.info(f"log_handler 准备上传日志文件: {log_entry}")
         try:
           curr_time = int(time.time())
           log_path = os.path.join(SWAGLOG_DIR, log_entry)
           setxattr(log_path, LOG_ATTR_NAME, int.to_bytes(curr_time, 4, sys.byteorder))
+          cloudlog.debug(f"log_handler 设置日志文件属性: {log_path}")
           with open(log_path) as f:
+            log_content = f.read()
+            log_size = len(log_content)
+            cloudlog.debug(f"log_handler 日志文件大小: {log_size} 字节")
             jsonrpc = {
               "method": "forwardLogs",
               "params": {
-                "logs": f.read()
+                "logs": log_content
               },
               "jsonrpc": "2.0",
               "id": log_entry
             }
+            cloudlog.info(f"log_handler 将日志放入发送队列: {log_entry}")
             low_priority_send_queue.put_nowait(json.dumps(jsonrpc))
             curr_log = log_entry
-        except OSError:
+        except OSError as e:
+          cloudlog.error(f"log_handler 打开日志文件失败: {str(e)}")
           pass  # file could be deleted by log rotation
 
       # wait for response up to ~100 seconds
       # always read queue at least once to process any old responses that arrive
-      for _ in range(100):
+      for i in range(100):
         if end_event.is_set():
+          cloudlog.info("log_handler 收到结束事件")
           break
         try:
           log_resp = json.loads(log_recv_queue.get(timeout=1))
           log_entry = log_resp.get("id")
           log_success = "result" in log_resp and log_resp["result"].get("success")
-          cloudlog.debug(f"athena.log_handler.forward_response {log_entry} {log_success}")
+          cloudlog.info(f"log_handler 收到响应: 文件={log_entry}, 成功={log_success}")
           if log_entry and log_success:
             log_path = os.path.join(SWAGLOG_DIR, log_entry)
             try:
               setxattr(log_path, LOG_ATTR_NAME, LOG_ATTR_VALUE_MAX_UNIX_TIME)
-            except OSError:
+              cloudlog.debug(f"log_handler 标记日志文件已上传: {log_path}")
+            except OSError as e:
+              cloudlog.error(f"log_handler 设置日志文件属性失败: {str(e)}")
               pass  # file could be deleted by log rotation
           if curr_log == log_entry:
+            cloudlog.info(f"log_handler 当前日志文件处理完成: {curr_log}")
             break
         except queue.Empty:
+          if i % 10 == 0:  # 每10次循环记录一次等待信息
+            cloudlog.debug(f"log_handler 等待响应中... ({i}/100)")
           if curr_log is None:
             break
 
-    except Exception:
-      cloudlog.exception("athena.log_handler.exception")
+    except Exception as e:
+      cloudlog.exception(f"log_handler 异常: {str(e)}")
+  cloudlog.info("log_handler 结束")
 
 
 def stat_handler(end_event: threading.Event) -> None:
+  cloudlog.info("stat_handler 启动")
   while not end_event.is_set():
     last_scan = 0.
     curr_scan = time.monotonic()
     try:
       if curr_scan - last_scan > 10:
         stat_filenames = list(filter(lambda name: not name.startswith(tempfile.gettempprefix()), os.listdir(STATS_DIR)))
+        cloudlog.debug(f"stat_handler 扫描到 {len(stat_filenames)} 个统计文件")
         if len(stat_filenames) > 0:
           stat_path = os.path.join(STATS_DIR, stat_filenames[0])
+          cloudlog.info(f"stat_handler 准备上传统计文件: {stat_path}")
           with open(stat_path) as f:
+            stats_content = f.read()
+            stats_size = len(stats_content)
+            cloudlog.debug(f"stat_handler 统计文件大小: {stats_size} 字节")
             jsonrpc = {
               "method": "storeStats",
               "params": {
-                "stats": f.read()
+                "stats": stats_content
               },
               "jsonrpc": "2.0",
               "id": stat_filenames[0]
             }
+            cloudlog.info(f"stat_handler 将统计数据放入发送队列: {stat_filenames[0]}")
             low_priority_send_queue.put_nowait(json.dumps(jsonrpc))
           os.remove(stat_path)
+          cloudlog.info(f"stat_handler 已删除已处理的统计文件: {stat_path}")
         last_scan = curr_scan
-    except Exception:
-      cloudlog.exception("athena.stat_handler.exception")
+    except Exception as e:
+      cloudlog.exception(f"stat_handler 异常: {str(e)}")
     time.sleep(0.1)
+  cloudlog.info("stat_handler 结束")
 
 
 def ws_proxy_recv(ws: WebSocket, local_sock: socket.socket, ssock: socket.socket, end_event: threading.Event, global_end_event: threading.Event) -> None:

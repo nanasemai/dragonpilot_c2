@@ -33,7 +33,7 @@ def update_translations(vanish=False, plural_only=None, translations_dir=TRANSLA
   if plural_only is None:
     plural_only = []
 
-  with open(LANGUAGES_FILE, "r") as f:
+  with open(LANGUAGES_FILE, "r", encoding='utf-8') as f:
     translation_files = json.load(f)
 
   for file in translation_files.values():

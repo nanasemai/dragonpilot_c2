@@ -78,6 +78,14 @@ class Route():
 
       # - Get the coordinates for the edge node and build the array of coordinates for the nodes before the edge node
       # on each of the common way relations, then get the vectors in cartesian plane for the end sections of each way.
+      if not way_relations:
+        # 如果没有可用的道路关系，直接结束
+        break
+        
+      # 确保last_wr有效
+      if last_wr is None or not hasattr(last_wr, 'last_node'):
+        break
+        
       ref_point = last_wr.last_node_coordinates
       points = np.array([wr.node_before_edge_coordinates(last_node_id) for wr in way_relations])
       v = ref_vectors(ref_point, points) * R
@@ -86,7 +94,13 @@ class Route():
       b = np.arctan2(v[:, 0], v[:, 1])
 
       # - Find index of las_wr section and calculate deltas of bearings to the other sections.
-      last_wr_idx = way_relations.index(last_wr)
+      try:
+        last_wr_idx = way_relations.index(last_wr)
+      except ValueError:
+        # 如果找不到last_wr，说明当前路段无法继续，直接结束路径构建
+        #cloudlog.warning(f"Route: Unable to find last_wr {last_wr} in way_relations")
+        break
+        
       b_ref = b[last_wr_idx]
       delta = b - b_ref
 

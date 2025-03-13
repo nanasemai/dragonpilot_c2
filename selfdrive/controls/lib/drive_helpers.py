@@ -1,4 +1,5 @@
 import math
+import numpy as np
 
 from cereal import car, log
 from openpilot.common.conversions import Conversions as CV
@@ -13,7 +14,7 @@ V_CRUISE_MIN = 8
 V_CRUISE_MAX = 145
 V_CRUISE_UNSET = 255
 V_CRUISE_INITIAL = 40
-V_CRUISE_INITIAL_EXPERIMENTAL_MODE = 40
+V_CRUISE_INITIAL_EXPERIMENTAL_MODE = 55
 IMPERIAL_INCREMENT = 1.6  # should be CV.MPH_TO_KPH, but this causes rounding errors
 
 MIN_SPEED = 1.0
@@ -22,7 +23,6 @@ CAR_ROTATION_RADIUS = 0.0
 
 # EU guidelines
 MAX_LATERAL_JERK = 5.0
-
 MAX_VEL_ERR = 5.0
 
 ButtonEvent = car.CarState.ButtonEvent
@@ -200,6 +200,17 @@ def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, curvature_rates):
   return safe_desired_curvature, safe_desired_curvature_rate
 
 
+# rick - we dont need this as it is for the latest model (0.9.5+) + controlsd
+def clip_curvature(v_ego, prev_curvature, new_curvature):
+  v_ego = max(MIN_SPEED, v_ego)
+  max_curvature_rate = MAX_LATERAL_JERK / (v_ego**2) # inexact calculation, check https://github.com/commaai/openpilot/pull/24755
+  # 使用 DT_MDL 替代未定义的 DT_CTRL
+  safe_desired_curvature = clip(new_curvature,
+                                prev_curvature - max_curvature_rate * DT_MDL,
+                                prev_curvature + max_curvature_rate * DT_MDL)
+
+  return safe_desired_curvature
+
 def get_friction(lateral_accel_error: float, lateral_accel_deadzone: float, friction_threshold: float,
                  torque_params: car.CarParams.LateralTorqueTuning, friction_compensation: bool) -> float:
   friction_interp = interp(
@@ -217,3 +228,62 @@ def get_speed_error(modelV2: log.ModelDataV2, v_ego: float) -> float:
     vel_err = clip(modelV2.temporalPose.trans[0] - v_ego, -MAX_VEL_ERR, MAX_VEL_ERR)
     return float(vel_err)
   return 0.0
+
+
+def get_road_edge(carstate, model_v2, toggle):
+  if not toggle or model_v2 is None:
+    return False
+
+  one_blinker = carstate.leftBlinker != carstate.rightBlinker
+  if not one_blinker:
+    return False
+
+  # 设置基本参数
+  min_lane_threshold = 3.0  # 最小车道宽度阈值
+  max_edge_distance = 3.5   # 最大道路边缘距离阈值
+  min_points_required = 5   # 最小所需点数
+  blinker_index = 0 if carstate.leftBlinker else 1
+
+  # 基础安全检查
+  if not hasattr(model_v2, 'roadEdges') or not hasattr(model_v2, 'laneLines'):
+    return True
+  
+  if blinker_index >= len(model_v2.roadEdges) or blinker_index + 1 >= len(model_v2.laneLines):
+    return True
+
+  desired_edge = model_v2.roadEdges[blinker_index]
+  current_lane = model_v2.laneLines[blinker_index + 1]
+
+  # 数据有效性检查
+  if not (len(desired_edge.x) >= min_points_required and len(desired_edge.y) >= min_points_required and 
+          len(current_lane.x) >= min_points_required and len(current_lane.y) >= min_points_required):
+    return True
+
+  # 检查道路边缘距离
+  if abs(desired_edge.y[0]) > max_edge_distance:
+    return False
+
+  try:
+    # 将capnp列表转换为numpy数组
+    edge_x = np.array(list(desired_edge.x))
+    edge_y = np.array(list(desired_edge.y))
+    lane_x = np.array(list(current_lane.x))
+    lane_y = np.array(list(current_lane.y))
+    
+    # 只计算前20米范围内的车道宽度
+    max_distance = 20.0
+    valid_indices = edge_x <= max_distance
+    if not np.any(valid_indices):
+      return True
+    
+    # 计算车道宽度
+    x = np.linspace(edge_x[0], min(edge_x[-1], max_distance), num=min(50, len(edge_x)))
+    lane_y_interp = np.interp(x, lane_x, lane_y)
+    desired_y_interp = np.interp(x, edge_x, edge_y)
+    lane_width = np.abs(desired_y_interp - lane_y_interp)
+    
+    # 判断车道宽度是否足够
+    return not (np.amax(lane_width) > min_lane_threshold)
+  except (IndexError, ValueError, TypeError) as e:
+    # 出现任何异常时，保守返回不安全
+    return True

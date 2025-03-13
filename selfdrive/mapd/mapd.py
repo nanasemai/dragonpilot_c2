@@ -9,7 +9,7 @@ from openpilot.selfdrive.mapd.lib.osm import OSM
 from openpilot.selfdrive.mapd.lib.geo import distance_to_points
 from openpilot.selfdrive.mapd.lib.WayCollection import WayCollection
 from openpilot.selfdrive.mapd.config import QUERY_RADIUS, MIN_DISTANCE_FOR_NEW_QUERY, FULL_STOP_MAX_SPEED, LOOK_AHEAD_HORIZON_TIME
-from openpilot.system.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog
 from openpilot.common.params import Params
 import json
 from cereal import log
