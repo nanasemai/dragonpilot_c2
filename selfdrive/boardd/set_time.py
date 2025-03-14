@@ -35,8 +35,9 @@ def get_ntp_time(logger):
       logger.debug(f"正在连接NTP服务器: {server}")
       response = requests.get(f"https://{server}", timeout=2, verify=False)
       if response.ok and 'date' in response.headers:
-        server_time = datetime.datetime.strptime(response.headers['date'], '%a, %d %b %Y %H:%M:%S %Z')
-        logger.info(f"NTP服务器 {server} 同步成功: {server_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        # 确保NTP时间使用UTC时区
+        server_time = datetime.datetime.strptime(response.headers['date'], '%a, %d %b %Y %H:%M:%S %Z').replace(tzinfo=datetime.timezone.utc)
+        logger.info(f"NTP服务器 {server} 同步成功: {server_time.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
         return server_time
     except Exception as e:
       logger.debug(f"NTP服务器 {server} 同步失败: {str(e)}")
@@ -54,9 +55,10 @@ def get_gps_time(logger):
         log = sm['gpsLocationExternal']
         # 检查 GPS fix 是否有效
         if log.flags % 2 != 0:
-          gps_time = datetime.datetime.fromtimestamp(log.unixTimestampMillis / 1000.0)
+          # GPS时间戳转换为UTC时间
+          gps_time = datetime.datetime.fromtimestamp(log.unixTimestampMillis / 1000.0, datetime.timezone.utc)
           if gps_time and gps_time > MIN_DATE:
-            logger.info(f"GPS时间获取成功: {gps_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info(f"GPS时间获取成功: {gps_time.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
             return gps_time
       if i % 10 == 0:  # 每10次循环记录一次等待信息
         logger.debug(f"等待GPS数据... ({i/10}/5秒)")
@@ -71,9 +73,12 @@ def get_last_valid_time(logger):
     logger.info("正在获取上次保存的有效时间...")
     timestamp = PARAMS.get(LAST_TIME_KEY)
     if timestamp:
-      time_value = datetime.datetime.fromtimestamp(int(timestamp))
-      logger.info(f"找到上次有效时间: {time_value.strftime('%Y-%m-%d %H:%M:%S')}")
-      return time_value
+      # 使用UTC时区处理时间戳
+      time_value = datetime.datetime.fromtimestamp(int(timestamp), datetime.timezone.utc)
+      # 转换为本地时间
+      local_time = time_value.astimezone()
+      logger.info(f"找到上次有效时间: {local_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+      return time_value  # 返回UTC时间，保持系统时间统一性
     logger.debug("未找到上次有效时间记录")
   except Exception as e:
     logger.error(f"获取上次有效时间失败: {str(e)}")
@@ -82,7 +87,10 @@ def get_last_valid_time(logger):
 def set_system_time(time_value, source, logger):
   try:
     if time_value and time_value > MIN_DATE:
-      time_str = time_value.strftime('%Y-%m-%d %H:%M:%S')
+      # 确保使用UTC时间设置系统
+      if time_value.tzinfo is None:
+        time_value = time_value.replace(tzinfo=datetime.timezone.utc)
+      time_str = time_value.astimezone(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
       logger.info(f"正在设置系统时间为 {time_str} (来源: {source})...")
       result = os.system(f"TZ=UTC date -s '{time_str}'") == 0
       if result:
