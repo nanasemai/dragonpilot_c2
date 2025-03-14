@@ -133,8 +133,10 @@ def set_time(logger):
   # 3. 尝试GPS时间（检查 ubloxd 进程是否运行）
   logger.info("【方法3】尝试使用GPS时间...")
   try:
-    if os.path.exists("/proc/1"):  # 检查是否在 Linux 系统
-      ubloxd_running = subprocess.run(["pgrep", "ubloxd"], capture_output=True).returncode == 0
+    # 修改为Android系统检测
+    if os.path.exists("/system/build.prop"):  # Android系统标志
+      # 使用Android方式检查进程
+      ubloxd_running = subprocess.run(["ps", "-A"], capture_output=True, text=True).stdout.find("ubloxd") != -1
       if ubloxd_running:
         logger.info("ubloxd进程正在运行，尝试获取GPS时间...")
         gps_time = get_gps_time(logger)
