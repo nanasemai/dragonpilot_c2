@@ -507,7 +507,18 @@ class CarInterfaceBase(ABC):
 
     # Handle permanent and temporary steering faults
     self.steering_unpressed = 0 if cs_out.steeringPressed else self.steering_unpressed + 1
+
+    # 添加转向力矩和角度监控日志
+    if abs(cs_out.steeringTorque) > 1.0 or abs(cs_out.steeringAngleDeg) > 90:
+      cloudlog.debug(f"转向状态监控: 车速={cs_out.vEgo:.1f}m/s, 转向角={cs_out.steeringAngleDeg:.1f}度, "
+                    f"转向力矩={cs_out.steeringTorque:.1f}, 档位={cs_out.gearShifter}")
+
     if cs_out.steerFaultTemporary:
+      # 扩展临时故障日志信息
+      cloudlog.warning(f"临时转向故障触发: 车速={cs_out.vEgo:.1f}m/s, 方向盘角度={cs_out.steeringAngleDeg:.1f}度, "
+                      f"方向盘力矩={cs_out.steeringTorque:.1f}, 档位={cs_out.gearShifter}, "
+                      f"用户操作方向盘={cs_out.steeringPressed}, 静止状态={cs_out.standstill}, "
+                      f"转向未按压计数={self.steering_unpressed}")
       if cs_out.steeringPressed and (not self.CS.out.steerFaultTemporary or self.no_steer_warning):
         self.no_steer_warning = True
       else:
@@ -523,6 +534,11 @@ class CarInterfaceBase(ABC):
       self.no_steer_warning = False
       self.silent_steer_warning = False
     if cs_out.steerFaultPermanent:
+      # 扩展永久故障日志信息
+      cloudlog.error(f"永久转向故障触发: 车速={cs_out.vEgo:.1f}m/s, 方向盘角度={cs_out.steeringAngleDeg:.1f}度, "
+                    f"方向盘力矩={cs_out.steeringTorque:.1f}, 档位={cs_out.gearShifter}, "
+                    f"用户操作方向盘={cs_out.steeringPressed}, 静止状态={cs_out.standstill}, "
+                    f"转向未按压计数={self.steering_unpressed}, CAN状态={cs_out.canValid}")
       events.add(EventName.steerUnavailable)
 
     # we engage when pcm is active (rising edge)
