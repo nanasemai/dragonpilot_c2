@@ -22,7 +22,7 @@ COST_DIM = COST_E_DIM + 2
 SPEED_OFFSET = 10.0
 MODEL_NAME = 'lat'
 ACADOS_SOLVER_TYPE = 'SQP_RTI'
-N = 16
+N = 32
 
 def gen_lat_model():
   model = AcadosModel()
