@@ -127,7 +127,7 @@ class Controls:
     self._dp_long_missing_lead_prev = False
     self._dp_lat_lane_change_assist_speed = int(self.params.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.MPH_TO_MS
     self._dp_lateral_road_edge_detected = self.params.get_bool("dp_lateral_road_edge_detected")
-
+    self._dp_road_edge_timer = 0.0  # 添加计时器变量
     self.sm = sm
     if self.sm is None:
       ignore = ['testJoystick']
@@ -269,6 +269,13 @@ class Controls:
     # controlsd is driven by can recv, expected at 100Hz
     self.rk = Ratekeeper(100, print_delay_threshold=None)
     self.prof = Profiler(False)  # off by default
+
+    # Fix LKA BUG
+    self.low_speed_steering = False
+    self.LOW_SPEED_THRESHOLD = 3.0  # m/s (约11km/h) - 适应停车场低速操作
+    self.STEERING_ANGLE_THRESHOLD = 90  # degrees - 适应大角度转向需求
+    self.STEERING_RATE_THRESHOLD = 250.0  # degrees/s - 快速转向判断阈值
+    self.last_steering_angle = 0.0  # 用于计算转向角速率
 
   def set_initial_state(self):
     if REPLAY:
@@ -414,17 +421,23 @@ class Controls:
         md = self.sm['modelV2']
         road_edge_detected = get_road_edge(CS, md, self._dp_lateral_road_edge_detected)
         if road_edge_detected:
-          self.events.add(EventName.laneChangeBlocked)
+          self._dp_road_edge_timer = 3.0  # 设置提醒持续时间
+        if road_edge_detected or self._dp_road_edge_timer > 0:
+          self.events.add(EventName.roadEdgeDetected)
         else:
           if direction == LaneChangeDirection.left:
             self.events.add(EventName.preLaneChangeLeft)
           else:
             self.events.add(EventName.preLaneChangeRight)
+        # 更新计时器
+        self._dp_road_edge_timer = max(0.0, self._dp_road_edge_timer - DT_CTRL)
+     
       else:
         if direction == LaneChangeDirection.left:
           self.events.add(EventName.preLaneChangeLeft)
         else:
           self.events.add(EventName.preLaneChangeRight)
+
     elif self.sm['lateralPlan'].laneChangeState in (LaneChangeState.laneChangeStarting,
                                                     LaneChangeState.laneChangeFinishing):
       self.events.add(EventName.laneChange)
@@ -713,12 +726,20 @@ class Controls:
     CC = car.CarControl.new_message()
     CC.enabled = self.enabled
 
+
+    # Fix ALKA
+    # 计算转向角速率
+    steering_rate = abs(CS.steeringAngleDeg - self.last_steering_angle) / DT_CTRL
+    self.last_steering_angle = CS.steeringAngleDeg
+    # 检查低速大角度快速转向
+    self.low_speed_steering = (CS.vEgo < self.LOW_SPEED_THRESHOLD and 
+                             abs(CS.steeringAngleDeg) > self.STEERING_ANGLE_THRESHOLD and
+                             steering_rate > self.STEERING_RATE_THRESHOLD)
     # Check which actuators can be enabled
     standstill = CS.vEgo <= max(self.CP.minSteerSpeed, MIN_LATERAL_CONTROL_SPEED) or CS.standstill
     CC.latActive = self.active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
                    (not standstill or self.joystick_mode)
-    CC.longActive = self.enabled and not self.events.contains(ET.OVERRIDE_LONGITUDINAL) and self.CP.openpilotLongitudinalControl
-
+    
     # rick - alka
     if (self._dp_alka and self._dp_alka_active) and not standstill and CS.cruiseState.available:
       if self.sm['liveCalibration'].calStatus != log.LiveCalibrationData.Status.calibrated:
@@ -727,8 +748,13 @@ class Controls:
         pass
       elif CS.gearShifter == car.CarState.GearShifter.reverse:
         pass
+      elif self.low_speed_steering:  # 添加低速转向检查
+        self.events.add(EventName.steerTempUnavailableCarMode)  # 添加提示事件
+        CC.latActive = False
       else:
         CC.latActive = True
+
+
 
     # rick - assist-less lane change
     if self._dp_lat_lane_change_assist_disabled:

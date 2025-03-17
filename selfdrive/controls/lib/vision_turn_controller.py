@@ -1,55 +1,47 @@
 import numpy as np
 import math
-from numpy import clip
 from cereal import custom
 from openpilot.common.numpy_fast import interp
+# from openpilot.common.params import Params
+# from common.realtime import sec_since_boot
 from openpilot.common.conversions import Conversions as CV
+# from selfdrive.controls.lib.lane_planner import TRAJECTORY_SIZE
 from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX
 import cereal.messaging as messaging
-from openpilot.common.realtime import DT_MDL
-# 轨迹预测参数
-TRAJECTORY_SIZE = 33                  # 增加预测点数量，提高预测精度
-_MIN_V = 5.0                         # 降低最低运行速度到18km/h，提升低速工况适应性
 
-# 转向状态触发阈值 (单位: m/s²)
-_ENTERING_PRED_LAT_ACC_TH = 1.2      # 降低进入阈值，提前介入转向控制
-_ABORT_ENTERING_PRED_LAT_ACC_TH = 1.0 # 相应调整取消阈值，保持合适的触发差值
+TRAJECTORY_SIZE = 33
+_MIN_V = 5.6  # Do not operate under 20km/h
 
-_TURNING_LAT_ACC_TH = 1.3            # 降低转向阈值，使转向更平顺
+_ENTERING_PRED_LAT_ACC_TH = 1.3  # Predicted Lat Acc threshold to trigger entering turn state.
+_ABORT_ENTERING_PRED_LAT_ACC_TH = 1.1  # Predicted Lat Acc threshold to abort entering state if speed drops.
 
-_LEAVING_LAT_ACC_TH = 1.3            # 调整离开阈值，与进入阈值对应
-_FINISH_LAT_ACC_TH = 1.1             # 调整结束阈值，确保平顺退出
+_TURNING_LAT_ACC_TH = 1.6  # Lat Acc threshold to trigger turning turn state.
 
-# 视觉曲率评估参数 (单位: 米)
-_EVAL_STEP = 5.                      # 减小评估步长，提高采样精度
-_EVAL_START = 20.                    # 缩短起始距离，提前规划
-_EVAL_LENGHT = 150.                  # 增加评估距离，提高预见性
+_LEAVING_LAT_ACC_TH = 1.3  # Lat Acc threshold to trigger leaving turn state.
+_FINISH_LAT_ACC_TH = 1.1  # Lat Acc threshold to trigger end of turn cycle.
+
+_EVAL_STEP = 5.  # mts. Resolution of the curvature evaluation.
+_EVAL_START = 20.  # mts. Distance ahead where to start evaluating vision curvature.
+_EVAL_LENGHT = 150.  # mts. Distance ahead where to stop evaluating vision curvature.
 _EVAL_RANGE = np.arange(_EVAL_START, _EVAL_LENGHT, _EVAL_STEP)
 
-# 横向加速度限制 (单位: m/s²)
-_A_LAT_REG_MAX = 2                 # 降低最大横向加速度，提高舒适性
+_A_LAT_REG_MAX = 2.  # Maximum lateral acceleration
 
-# 速度期望时间范围 (单位: 秒)
-_NO_OVERSHOOT_TIME_HORIZON = 3.5     # 缩短预测时间，提高控制响应性
+_NO_OVERSHOOT_TIME_HORIZON = 4.  # s. Time to use for velocity desired based on a_target when not overshooting.
 
-# 进入转向时的减速控制参数 (单位: m/s²)
-_ENTERING_SMOOTH_DECEL_V = [-0.15, -0.8]  # 优化减速度范围，使减速更平顺
-_ENTERING_SMOOTH_DECEL_BP = [1.2, 2.8]    # 调整触发点，与新的加速度阈值匹配
+# Lookup table for the minimum smooth deceleration during the ENTERING state
+# depending on the actual maximum absolute lateral acceleration predicted on the turn ahead.
+_ENTERING_SMOOTH_DECEL_V = [-0.2, -1.]  # min decel value allowed on ENTERING state
+_ENTERING_SMOOTH_DECEL_BP = [1.3, 3.]  # absolute value of lat acc ahead
 
-# 转向过程中的加速度控制参数 (单位: m/s²)
-_TURNING_ACC_V = [0.4, 0., -0.3]     # 降低加减速幅度，提升舒适性
-_TURNING_ACC_BP = [1.4, 2.1, 2.8]    # 优化分段点，使加减速更平滑
+# Lookup table for the acceleration for the TURNING state
+# depending on the current lateral acceleration of the vehicle.
+_TURNING_ACC_V = [0.5, 0., -0.4]  # acc value
+_TURNING_ACC_BP = [1.5, 2.3, 3.]  # absolute value of current lat acc
 
-# 退出转向时的加速度 (单位: m/s²)
-_LEAVING_ACC = 0.4                    # 降低退出加速度，确保平顺性
+_LEAVING_ACC = 0.5  # Confortble acceleration to regain speed while leaving a turn.
 
-# 车道线概率要求
-_MIN_LANE_PROB = 0.65                 # 提高概率阈值，增加预测可靠性
-
-# 动态转向控制参数
-_SPEED_FACTOR = 0.8  # 速度影响因子
-_CURVE_FACTOR = 1.2  # 曲率影响因子
-_COMFORT_FACTOR = 0.9  # 舒适度因子
+_MIN_LANE_PROB = 0.6  # Minimum lanes probability to allow curvature prediction based on lanes.
 
 _DEBUG = False
 
@@ -100,7 +92,7 @@ def _description_for_state(turn_controller_state):
     return 'LEAVING'
 
 
-class VisionTurnController:
+class VisionTurnController():
   def __init__(self, CP):
     # self._params = Params()
     self._CP = CP
@@ -115,39 +107,8 @@ class VisionTurnController:
     self._v_overshoot = 0.
     self._state = VisionTurnControllerState.disabled
     self._sm = messaging.SubMaster(['lateralPlanExt'])
-    self._last_pred_lat_acc = 0.  # 记录上一次预测的横向加速度
-    self._acc_history = []        # 加速度历史记录
-    self._curve_history = []      # 曲率历史记录
+
     self._reset()
-
-
-  def _get_dynamic_thresholds(self):
-    """计算动态阈值"""
-    # 确保 _v_ego 不小于最小速度且不大于最大速度
-    v_ego_safe = clip(self._v_ego, _MIN_V, V_CRUISE_MAX * CV.KPH_TO_MS)
-
-    # 优化速度修正因子计算
-    speed_factor = clip(v_ego_safe / 20.0, 0.5, 1.0)  # 基准速度20m/s
-    speed_mod = interp(speed_factor,
-                      [0.5, 1.0],
-                      [1.0, _SPEED_FACTOR])
-
-    # 基于曲率变化调整阈值，添加异常值过滤
-    curve_rate = 0.0
-    if len(self._curve_history) > 1:
-        delta = self._curve_history[-1] - self._curve_history[-2]
-        # 添加更严格的异常值过滤
-        if 0.0 <= abs(delta) < 1.0:  # 合理的曲率变化范围
-            curve_rate = delta / DT_MDL
-
-    curve_mod = clip(
-        interp(abs(curve_rate),
-               [0.0, 2.0],
-               [1.0, _CURVE_FACTOR]),
-        0.5, 1.5  # 限制修正系数范围
-    )
-
-    return speed_mod, curve_mod
 
   @property
   def state(self):
@@ -234,139 +195,86 @@ class VisionTurnController:
 
     current_curvature = abs(
       sm['carState'].steeringAngleDeg * CV.DEG_TO_RAD / (self._CP.steerRatio * self._CP.wheelbase))
-
-    # 计算当前横向加速度
     self._current_lat_acc = current_curvature * self._v_ego**2
-
-    # 更新历史记录，限制最大长度为10
-    if len(self._acc_history) >= 10:
-        self._acc_history = self._acc_history[1:]
-        self._curve_history = self._curve_history[1:]
-    self._acc_history.append(self._current_lat_acc)
-    self._curve_history.append(current_curvature)
-
-    # 使用动态阈值
-    speed_mod, curve_mod = self._get_dynamic_thresholds()
-    comfort_factor = _COMFORT_FACTOR if self._current_lat_acc > 1.5 else 1.0
-
-    # 应用动态修正系数
-    self._max_v_for_current_curvature = math.sqrt(_A_LAT_REG_MAX * speed_mod * curve_mod * comfort_factor / current_curvature) if current_curvature > 0 \
+    self._max_v_for_current_curvature = math.sqrt(_A_LAT_REG_MAX / current_curvature) if current_curvature > 0 \
       else V_CRUISE_MAX * CV.KPH_TO_MS
 
     pred_curvatures = eval_curvature(path_poly, _EVAL_RANGE)
     max_pred_curvature = np.amax(pred_curvatures)
+    self._max_pred_lat_acc = self._v_ego**2 * max_pred_curvature
 
-    # 使用动态修正的预测横向加速度
-    self._max_pred_lat_acc = (self._v_ego**2 * max_pred_curvature) * speed_mod * curve_mod * comfort_factor
-
-    # 动态调整最大曲率阈值
-    max_curvature_for_vego = (_A_LAT_REG_MAX * speed_mod * curve_mod * comfort_factor) / max(self._v_ego, 0.1)**2
+    max_curvature_for_vego = _A_LAT_REG_MAX / max(self._v_ego, 0.1)**2
     lat_acc_overshoot_idxs = np.nonzero(pred_curvatures >= max_curvature_for_vego)[0]
     self._lat_acc_overshoot_ahead = len(lat_acc_overshoot_idxs) > 0
 
     if self._lat_acc_overshoot_ahead:
-        # 使用动态修正的超调速度
-        self._v_overshoot = min(math.sqrt(_A_LAT_REG_MAX * speed_mod * curve_mod * comfort_factor / max_pred_curvature),
-                               self._v_cruise_setpoint)
-        self._v_overshoot_distance = max(lat_acc_overshoot_idxs[0] * _EVAL_STEP + _EVAL_START, _EVAL_STEP)
-        _debug(f'TVC: High LatAcc. Dist: {self._v_overshoot_distance:.2f}, v: {self._v_overshoot * CV.MS_TO_KPH:.2f}')
-
-    # 保存当前预测值用于下次计算
-    self._last_pred_lat_acc = self._max_pred_lat_acc
+      self._v_overshoot = min(math.sqrt(_A_LAT_REG_MAX / max_pred_curvature), self._v_cruise_setpoint)
+      self._v_overshoot_distance = max(lat_acc_overshoot_idxs[0] * _EVAL_STEP + _EVAL_START, _EVAL_STEP)
+      _debug(f'TVC: High LatAcc. Dist: {self._v_overshoot_distance:.2f}, v: {self._v_overshoot * CV.MS_TO_KPH:.2f}')
 
   def _state_transition(self):
-    if not self._op_enabled or not self._is_enabled or self._gas_pressed or abs(self._v_ego) < 0.1:
+    # In any case, if system is disabled or the feature is disabeld or gas is pressed, disable.
+    if not self._op_enabled or not self._is_enabled or self._gas_pressed:
       self.state = VisionTurnControllerState.disabled
       return
 
-    if not hasattr(self, '_state_time'):
-      self._state_time = 0.0
-    else:
-      self._state_time += DT_MDL
-
-    speed_mod, curve_mod = self._get_dynamic_thresholds()
-    comfort_factor = _COMFORT_FACTOR if self._current_lat_acc > 1.5 else 1.0
-
-    entering_th = _ENTERING_PRED_LAT_ACC_TH * speed_mod * curve_mod * comfort_factor
-    turning_th = _TURNING_LAT_ACC_TH * speed_mod * curve_mod * comfort_factor
-    leaving_th = _LEAVING_LAT_ACC_TH * speed_mod * curve_mod * comfort_factor
-    finish_th = _FINISH_LAT_ACC_TH * speed_mod * curve_mod * comfort_factor
-    MIN_STATE_TIME = 0.5
-
-    current_state = self.state
-    if current_state == VisionTurnControllerState.disabled:
-      if self._max_pred_lat_acc >= entering_th and \
-         abs(self._max_pred_lat_acc - self._last_pred_lat_acc) < 0.5 and \
-         self._state_time >= MIN_STATE_TIME:
-        self.state = VisionTurnControllerState.entering
-        self._state_time = 0.0
-
-    elif current_state == VisionTurnControllerState.entering:
-      if self._current_lat_acc >= turning_th and self._state_time >= MIN_STATE_TIME:
-        self.state = VisionTurnControllerState.turning
-        self._state_time = 0.0
-      elif self._max_pred_lat_acc < entering_th * 0.8:
-        self.state = VisionTurnControllerState.disabled
-        self._state_time = 0.0
-
-    elif current_state == VisionTurnControllerState.turning:
-      if self._current_lat_acc <= leaving_th and self._state_time >= MIN_STATE_TIME:
-        self.state = VisionTurnControllerState.leaving
-        self._state_time = 0.0
-
-    elif current_state == VisionTurnControllerState.leaving:
-      if self._current_lat_acc >= turning_th and self._state_time >= MIN_STATE_TIME:
-        self.state = VisionTurnControllerState.turning
-        self._state_time = 0.0
-      elif self._current_lat_acc < finish_th and \
-           self._max_pred_lat_acc < finish_th and \
-           self._state_time >= MIN_STATE_TIME:
-        self.state = VisionTurnControllerState.disabled
-        self._state_time = 0.0
-
-    if current_state != self.state:
-      _debug(f"State changed from {_description_for_state(current_state)} to {_description_for_state(self.state)}")
-
-  def _update_solution(self):
-    # 获取动态阈值用于调整加速度
-    speed_mod, curve_mod = self._get_dynamic_thresholds()
-    comfort_factor = _COMFORT_FACTOR if self._current_lat_acc > 1.5 else 1.0
-
-    # 初始化 a_target
-    a_target = self._a_ego  # 默认值设置移到开头
-
     # DISABLED
     if self.state == VisionTurnControllerState.disabled:
-      a_target = self._a_ego
-
+      # Do not enter a turn control cycle if speed is low.
+      if self._v_ego <= _MIN_V:
+        pass
+      # If substantial lateral acceleration is predicted ahead, then move to Entering turn state.
+      elif self._max_pred_lat_acc >= _ENTERING_PRED_LAT_ACC_TH:
+        self.state = VisionTurnControllerState.entering
     # ENTERING
     elif self.state == VisionTurnControllerState.entering:
-      # 使用动态修正的减速度
-      base_decel = interp(self._max_pred_lat_acc, _ENTERING_SMOOTH_DECEL_BP, _ENTERING_SMOOTH_DECEL_V)
-      a_target = base_decel * speed_mod * curve_mod * comfort_factor
-
-      if self._lat_acc_overshoot_ahead:
-        # 优化超调速度计算
-        distance_factor = clip(self._v_overshoot_distance / 50.0, 0.5, 1.5)
-        v_diff = self._v_overshoot - self._v_ego
-        a_target = min((v_diff * distance_factor) / max(2.0, self._v_overshoot_distance/self._v_ego), a_target)
-
-      _debug(f'TVC Entering: Overshooting: {self._lat_acc_overshoot_ahead}')
-      _debug(f'    Decel: {a_target:.2f}, target v: {self.v_turn * CV.MS_TO_KPH}')
-
+      # Transition to Turning if current lateral acceleration is over the threshold.
+      if self._current_lat_acc >= _TURNING_LAT_ACC_TH:
+        self.state = VisionTurnControllerState.turning
+      # Abort if the predicted lateral acceleration drops
+      elif self._max_pred_lat_acc < _ABORT_ENTERING_PRED_LAT_ACC_TH:
+        self.state = VisionTurnControllerState.disabled
     # TURNING
     elif self.state == VisionTurnControllerState.turning:
-      # 使用动态修正的转弯加速度
-      base_acc = interp(self._current_lat_acc, _TURNING_ACC_BP, _TURNING_ACC_V)
-      a_target = base_acc * speed_mod * curve_mod * comfort_factor
-
+      # Transition to Leaving if current lateral acceleration drops drops below threshold.
+      if self._current_lat_acc <= _LEAVING_LAT_ACC_TH:
+        self.state = VisionTurnControllerState.leaving
     # LEAVING
     elif self.state == VisionTurnControllerState.leaving:
-      # 使用动态修正的离开加速度
-      a_target = _LEAVING_ACC * speed_mod * curve_mod * comfort_factor
+      # Transition back to Turning if current lateral acceleration goes back over the threshold.
+      if self._current_lat_acc >= _TURNING_LAT_ACC_TH:
+        self.state = VisionTurnControllerState.turning
+      # Finish if current lateral acceleration goes below threshold.
+      elif self._current_lat_acc < _FINISH_LAT_ACC_TH:
+        self.state = VisionTurnControllerState.disabled
 
-    # 简化加速度限制逻辑
-    self._a_target = np.clip(a_target, -2.0, 1.0)
+  def _update_solution(self):
+    # DISABLED
+    if self.state == VisionTurnControllerState.disabled:
+      # when not overshooting, calculate v_turn as the speed at the prediction horizon when following
+      # the smooth deceleration.
+      a_target = self._a_ego
+    # ENTERING
+    elif self.state == VisionTurnControllerState.entering:
+      # when not overshooting, target a smooth deceleration in preparation for a sharp turn to come.
+      a_target = interp(self._max_pred_lat_acc, _ENTERING_SMOOTH_DECEL_BP, _ENTERING_SMOOTH_DECEL_V)
+      if self._lat_acc_overshoot_ahead:
+        # when overshooting, target the acceleration needed to achieve the overshoot speed at
+        # the required distance
+        a_target = min((self._v_overshoot**2 - self._v_ego**2) / (2 * self._v_overshoot_distance), a_target)
+      _debug(f'TVC Entering: Overshooting: {self._lat_acc_overshoot_ahead}')
+      _debug(f'    Decel: {a_target:.2f}, target v: {self.v_turn * CV.MS_TO_KPH}')
+    # TURNING
+    elif self.state == VisionTurnControllerState.turning:
+      # When turning we provide a target acceleration that is confortable for the lateral accelearation felt.
+      a_target = interp(self._current_lat_acc, _TURNING_ACC_BP, _TURNING_ACC_V)
+    # LEAVING
+    elif self.state == VisionTurnControllerState.leaving:
+      # When leaving we provide a confortable acceleration to regain speed.
+      a_target = _LEAVING_ACC
+
+    # update solution values.
+    self._a_target = a_target
 
   def update(self, enabled, v_ego, a_ego, v_cruise_setpoint, sm):
     self._op_enabled = enabled

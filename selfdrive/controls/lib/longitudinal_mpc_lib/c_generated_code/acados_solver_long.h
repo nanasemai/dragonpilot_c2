@@ -60,7 +60,7 @@
 #define LONG_NY0    6
 #define LONG_NY     6
 #define LONG_NYN    5
-#define LONG_N      12
+#define LONG_N      10
 #define LONG_NH     4
 #define LONG_NPHI   0
 #define LONG_NHN    0

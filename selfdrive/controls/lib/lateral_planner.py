@@ -80,16 +80,6 @@ class LateralPlanner:
     self.v_ego = max(MIN_SPEED, sm['carState'].vEgo)
     measured_curvature = sm['controlsState'].curvature
 
-    # 确保在调用set_weights前设置当前车速
-    self.lat_mpc.current_v_ego = self.v_ego
-
-    # 同时更新p参数，确保求解器内部状态一致
-    lateral_factor = max(0, self.factor1 - (self.factor2 * self.v_ego**2))
-    p = np.array([self.v_ego, lateral_factor])
-    # 预先设置参数，避免在set_weights中获取失败
-    for i in range(LAT_MPC_N + 1):
-      self.lat_mpc.solver.set(i, "p", p)
-
     if self.param_read_counter % 50 == 0:
       self._dp_lat_lane_priority_mode = self.params.get_bool("dp_lat_lane_priority_mode")
       if self._dp_lat_lane_priority_mode:

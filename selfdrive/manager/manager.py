@@ -252,12 +252,22 @@ def manager_thread() -> None:
   sm = messaging.SubMaster(['deviceState', 'carParams'], poll='deviceState')
   pm = messaging.PubMaster(['managerState'])
 
+  last_network_type = log.DeviceState.NetworkType.none
+
   write_onroad_params(False, params)
   ensure_running(managed_processes.values(), False, params=params, CP=sm['carParams'], not_run=ignore)
 
   started_prev = False
   while True:
     sm.update(1000)
+    
+    # 检查网络状态变化时更新时间
+    if sm.updated['deviceState']:
+      current_network = sm['deviceState'].networkType
+      if current_network != last_network_type and current_network != log.DeviceState.NetworkType.none:
+        set_time(cloudlog)
+      last_network_type = current_network
+
     # 添加进程状态监控
     process_states = {}
     for p in managed_processes.values():

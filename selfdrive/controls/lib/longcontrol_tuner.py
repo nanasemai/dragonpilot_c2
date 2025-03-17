@@ -54,20 +54,7 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
 
 
 class LongControlTuner():
-  """纵向控制调谐器
-    
-    功能：
-    1. 动态加载和更新PID参数
-    2. 实现纵向控制状态管理
-    3. 执行PID控制计算
-    4. 提供参数在线调整
-    """
   def __init__(self, CP):
-    """初始化控制器
-        
-        参数：
-        - CP: 车辆参数配置
-        """
     self.CP = CP
     self.long_control_state = LongCtrlState.off  # initialized to off
     # PID控制相关参数
@@ -77,20 +64,20 @@ class LongControlTuner():
     # 死区参数
     self.deadzoneBP = [0.0] # 死区断点
     self.deadzoneV = [0.0] # 死区值
-    
+
     self.pid = None
     # 调谐器配置
     self.tuner_filepath = os.getcwd() + '/../../long_pid_tuner.json'
     self.tuner_last_check_update = time.time()
     self.tuner_modified_time = None
     self.tuner_update_interval = 10 # every 10 seconds # 更新间隔(秒)
-    
+
     print("using LongControlTuner conf:", self.tuner_filepath)
-        
+
     self.reload_tuner() # 加载调谐参数
 
   def write_tuner(self):
-    with open(self.tuner_filepath, 'w') as f:  
+    with open(self.tuner_filepath, 'w') as f:
       #print("dumping longitudeTuning", type(self.CP.longitudinalTuning.kpBP), type(self.CP.longitudinalTuning.kpV), type(self.CP.longitudinalTuning.kiBP), type(self.CP.longitudinalTuning.kiV), type(self.CP.longitudinalTuning.deadzoneBP), type(self.CP.longitudinalTuning.deadzoneV))
       print("dumping longitudeTuning", self.CP.longitudinalTuning.kpBP, self.CP.longitudinalTuning.kpV, self.CP.longitudinalTuning.kiBP, self.CP.longitudinalTuning.kiV, self.CP.longitudinalTuning.deadzoneBP, self.CP.longitudinalTuning.deadzoneV)
       data = {"kp_bp": list(self.CP.longitudinalTuning.kpBP),
@@ -100,12 +87,12 @@ class LongControlTuner():
               "dz_bp": list(self.CP.longitudinalTuning.deadzoneBP),
               "dz_v": list(self.CP.longitudinalTuning.deadzoneV)}
       json.dump(data, f)
-    
+
   def reload_tuner(self):
     if not os.path.exists(self.tuner_filepath):
       print("LongControlTuner not ready")
       return
-    
+
     modified_time = os.path.getmtime(self.tuner_filepath)
     # only if file modified
     if self.tuner_modified_time != modified_time:
@@ -116,12 +103,12 @@ class LongControlTuner():
         except json.JSONDecodeError:
           data = {}
         if "kp_bp" in data and "kp_v" in data and "ki_bp" in data and "ki_v" in data and "dz_bp" in data and "dz_v" in data:
-          self.pid = PIDController((data["kp_bp"], data["kp_v"]), 
-                                   (data["ki_bp"], data["ki_v"]), 
+          self.pid = PIDController((data["kp_bp"], data["kp_v"]),
+                                   (data["ki_bp"], data["ki_v"]),
                                    k_f=self.k_f, rate=1 / DT_CTRL)
           self.deadzoneBP = data["dz_bp"]
           self.deadzoneV = data["dz_v"]
-        
+
           self.tuner_modified_time = modified_time
           print("LongControlTuner update:", json.dumps(data))
         else:
@@ -137,20 +124,13 @@ class LongControlTuner():
 
   def update(self, active, CS, long_plan, accel_limits, t_since_plan):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
-    """更新控制器状态和计算控制输出  
-    主要步骤：
-    1. 检查参数更新
-    2. 计算目标速度和加速度
-    3. 更新控制状态
-    4. 执行PID控制
-    """
-    # 检查参数更新
+
     # check update
     current_time = time.time()
     if abs(current_time - self.tuner_last_check_update) >= self.tuner_update_interval:
       self.reload_tuner()
       self.tuner_last_check_update = current_time
-    
+
     # 计算控制目标
     # Interp control trajectory
     speeds = long_plan.speeds

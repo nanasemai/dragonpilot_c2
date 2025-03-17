@@ -508,28 +508,42 @@ class CarInterfaceBase(ABC):
     # Handle permanent and temporary steering faults
     self.steering_unpressed = 0 if cs_out.steeringPressed else self.steering_unpressed + 1
 
+    # 根据车速动态调整转向监控阈值
+    speed_factor = max(1.0, cs_out.vEgo * 0.5)  # 车速越低，阈值越宽松
+    torque_threshold = 1.0 * speed_factor
+    angle_threshold = 90.0 / speed_factor
+
     # 添加转向力矩和角度监控日志
-    if abs(cs_out.steeringTorque) > 1.0 or abs(cs_out.steeringAngleDeg) > 90:
-      cloudlog.debug(f"转向状态监控: 车速={cs_out.vEgo:.1f}m/s, 转向角={cs_out.steeringAngleDeg:.1f}度, "
-                    f"转向力矩={cs_out.steeringTorque:.1f}, 档位={cs_out.gearShifter}")
+    # if abs(cs_out.steeringTorque) > torque_threshold or abs(cs_out.steeringAngleDeg) > angle_threshold:
+    #   cloudlog.debug(f"转向状态监控: 车速={cs_out.vEgo:.1f}m/s, 转向角={cs_out.steeringAngleDeg:.1f}度, "
+    #                 f"转向力矩={cs_out.steeringTorque:.1f}, 档位={cs_out.gearShifter}")
 
     if cs_out.steerFaultTemporary:
-      # 扩展临时故障日志信息
-      cloudlog.warning(f"临时转向故障触发: 车速={cs_out.vEgo:.1f}m/s, 方向盘角度={cs_out.steeringAngleDeg:.1f}度, "
-                      f"方向盘力矩={cs_out.steeringTorque:.1f}, 档位={cs_out.gearShifter}, "
-                      f"用户操作方向盘={cs_out.steeringPressed}, 静止状态={cs_out.standstill}, "
-                      f"转向未按压计数={self.steering_unpressed}")
-      if cs_out.steeringPressed and (not self.CS.out.steerFaultTemporary or self.no_steer_warning):
-        self.no_steer_warning = True
+      # 低速大角度转向时放宽故障判断条件
+      low_speed_threshold = 5.0  # m/s
+      if cs_out.vEgo < low_speed_threshold and abs(cs_out.steeringAngleDeg) > 60.0:
+        fault_threshold = 80.0  # 低速时允许更大的转向力矩
       else:
-        self.no_steer_warning = False
+        fault_threshold = 60.0
 
-        # if the user overrode recently, show a less harsh alert
-        if self.silent_steer_warning or cs_out.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
-          self.silent_steer_warning = True
-          events.add(EventName.steerTempUnavailableSilent)
+      if abs(cs_out.steeringTorque) > fault_threshold:
+        # cloudlog.warning(f"临时转向故障触发: 车速={cs_out.vEgo:.1f}m/s, 方向盘角度={cs_out.steeringAngleDeg:.1f}度, "
+        #                 f"方向盘力矩={cs_out.steeringTorque:.1f}, 档位={cs_out.gearShifter}, "
+        #                 f"用户操作方向盘={cs_out.steeringPressed}, 静止状态={cs_out.standstill}, "
+        #                 f"转向未按压计数={self.steering_unpressed}")
+
+        if cs_out.steeringPressed and (not self.CS.out.steerFaultTemporary or self.no_steer_warning):
+          self.no_steer_warning = True
         else:
-          events.add(EventName.steerTempUnavailable)
+          self.no_steer_warning = False
+
+          # 低速时延长警告触发时间
+          warning_threshold = int(2.5 / DT_CTRL) if cs_out.vEgo < low_speed_threshold else int(1.5 / DT_CTRL)
+          if self.silent_steer_warning or cs_out.standstill or self.steering_unpressed < warning_threshold:
+            self.silent_steer_warning = True
+            events.add(EventName.steerTempUnavailableSilent)
+          else:
+            events.add(EventName.steerTempUnavailable)
     else:
       self.no_steer_warning = False
       self.silent_steer_warning = False
@@ -644,8 +658,7 @@ class CarStateBase(ABC):
     self.left_blinker_prev = left_blinker_stalk
     self.right_blinker_prev = right_blinker_stalk
 
-    return bool(left_blinker_stalk or self.left_blinker_cnt > 0), bool(
-      right_blinker_stalk or self.right_blinker_cnt > 0)
+    return bool(left_blinker_stalk or self.left_blinker_cnt > 0), bool(right_blinker_stalk or self.right_blinker_cnt > 0)
 
   @staticmethod
   def parse_gear_shifter(gear: Optional[str]) -> car.CarState.GearShifter:
@@ -695,10 +708,7 @@ INTERFACE_ATTR_FILE = {
 
 # rick - modify `Dict[str | StrEnum, Any]` to `Dict[Union[str, StrEnum], Any]` for python 3.8
 from typing import Union
-
-
-def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: bool = False) -> Dict[
-  Union[str, StrEnum], Any]:
+def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: bool = False) -> Dict[Union[str, StrEnum], Any]:
   # read all the folders in selfdrive/car and return a dict where:
   # - keys are all the car models or brand names
   # - values are attr values from all car folders
@@ -706,8 +716,7 @@ def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: boo
   for car_folder in sorted([x[0] for x in os.walk(BASEDIR + '/selfdrive/car')]):
     try:
       brand_name = car_folder.split('/')[-1]
-      brand_values = __import__(f'openpilot.selfdrive.car.{brand_name}.{INTERFACE_ATTR_FILE.get(attr, "values")}',
-                                fromlist=[attr])
+      brand_values = __import__(f'openpilot.selfdrive.car.{brand_name}.{INTERFACE_ATTR_FILE.get(attr, "values")}', fromlist=[attr])
       if hasattr(brand_values, attr) or not ignore_none:
         attr_data = getattr(brand_values, attr, None)
       else:

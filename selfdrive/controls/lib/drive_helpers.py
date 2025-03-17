@@ -202,14 +202,19 @@ def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, curvature_rates):
 
 # rick - we dont need this as it is for the latest model (0.9.5+) + controlsd
 def clip_curvature(v_ego, prev_curvature, new_curvature):
-  v_ego = max(MIN_SPEED, v_ego)
-  max_curvature_rate = MAX_LATERAL_JERK / (v_ego**2) # inexact calculation, check https://github.com/commaai/openpilot/pull/24755
-  # 使用 DT_MDL 替代未定义的 DT_CTRL
-  safe_desired_curvature = clip(new_curvature,
-                                prev_curvature - max_curvature_rate * DT_MDL,
-                                prev_curvature + max_curvature_rate * DT_MDL)
-
-  return safe_desired_curvature
+    v_ego = max(MIN_SPEED, v_ego)
+    # 优化曲率限制计算
+    max_curvature_rate = (MAX_LATERAL_JERK / (v_ego**2)) * (0.8 + 0.2 * min(v_ego / 20.0, 1.0))
+    
+    # 添加平滑处理
+    if abs(new_curvature - prev_curvature) < 0.0001:
+        return prev_curvature
+        
+    safe_desired_curvature = clip(new_curvature,
+                                 prev_curvature - max_curvature_rate * DT_MDL,
+                                 prev_curvature + max_curvature_rate * DT_MDL)
+    
+    return safe_desired_curvature
 
 def get_friction(lateral_accel_error: float, lateral_accel_deadzone: float, friction_threshold: float,
                  torque_params: car.CarParams.LateralTorqueTuning, friction_compensation: bool) -> float:

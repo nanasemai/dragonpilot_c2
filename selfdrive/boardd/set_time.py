@@ -77,7 +77,7 @@ def get_last_valid_time(logger):
       time_value = datetime.datetime.fromtimestamp(int(timestamp), datetime.timezone.utc)
       # 转换为本地时间
       local_time = time_value.astimezone()
-      logger.info(f"找到上次有效时间: {local_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+      logger.info(f"找到上次有效时间: {local_time.strftime('%Y-%m-%d %H:%M:%S %Z')}") 
       return time_value  # 返回UTC时间，保持系统时间统一性
     logger.debug("未找到上次有效时间记录")
   except Exception as e:
@@ -133,18 +133,16 @@ def set_time(logger):
   # 3. 尝试GPS时间（检查 ubloxd 进程是否运行）
   logger.info("【方法3】尝试使用GPS时间...")
   try:
-    # 修改为Android系统检测
-    if os.path.exists("/system/build.prop"):  # Android系统标志
-      # 使用Android方式检查进程
-      ubloxd_running = subprocess.run(["ps", "-A"], capture_output=True, text=True).stdout.find("ubloxd") != -1
-      if ubloxd_running:
-        logger.info("ubloxd进程正在运行，尝试获取GPS时间...")
-        gps_time = get_gps_time(logger)
-        if gps_time and set_system_time(gps_time, "GPS", logger):
-          logger.info("=== 时间同步完成 ===")
-          return
-      else:
-        logger.warning("ubloxd进程未运行，无法获取GPS时间")
+    # 直接检查 ubloxd 进程
+    ubloxd_running = subprocess.run(["ps", "-A"], capture_output=True, text=True).stdout.find("ubloxd") != -1
+    if ubloxd_running:
+      logger.info("ubloxd进程正在运行，尝试获取GPS时间...")
+      gps_time = get_gps_time(logger)
+      if gps_time and set_system_time(gps_time, "GPS", logger):
+        logger.info("=== 时间同步完成 ===")
+        return
+    else:
+      logger.warning("ubloxd进程未运行，无法获取GPS时间")
   except Exception as e:
     logger.error(f"检查ubloxd状态失败: {str(e)}")
 

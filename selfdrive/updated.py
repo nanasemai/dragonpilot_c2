@@ -103,26 +103,31 @@ def parse_release_notes(basedir: str) -> bytes:
   return b""
 
 def setup_git_options(cwd: str) -> None:
-  # We sync FS object atimes (which NEOS doesn't use) and mtimes, but ctimes
-  # are outside user control. Make sure Git is set up to ignore system ctimes,
-  # because they change when we make hard links during finalize. Otherwise,
-  # there is a lot of unnecessary churn. This appears to be a common need on
-  # OSX as well: https://www.git-tower.com/blog/make-git-rebase-safe-on-osx/
+    # 项目级别配置
+    git_local_cfg = [
+        ("core.trustctime", "false"),
+        ("core.checkStat", "minimal"),
+        ("gc.auto", "0"),
+        ("gc.autoDetach", "false"),
+    ]
+    
+    # 全局配置
+    git_global_cfg = [
+        ("protocol.version", "2"),
+        ("http.postBuffer", "1048576000"),
+        ("http.version", "HTTP/1.1"),
+        ("http.lowSpeedLimit", "0"),
+        ("http.lowSpeedTime", "999999"),
+        ("http.sslVerify", "false"),
+    ]
 
-  # We are using copytree to copy the directory, which also changes
-  # inode numbers. Ignore those changes too.
+    # 设置项目级别配置
+    for option, value in git_local_cfg:
+        run(["git", "config", option, value], cwd)
 
-  # Set protocol to the new version (default after git 2.26) to reduce data
-  # usage on git fetch --dry-run from about 400KB to 18KB.
-  git_cfg = [
-    ("core.trustctime", "false"),
-    ("core.checkStat", "minimal"),
-    ("protocol.version", "2"),
-    ("gc.auto", "0"),
-    ("gc.autoDetach", "false"),
-  ]
-  for option, value in git_cfg:
-    run(["git", "config", option, value], cwd)
+    # 设置全局配置
+    for option, value in git_global_cfg:
+        run(["git", "config", "--global", option, value], cwd)
 
 
 def dismount_overlay() -> None:
@@ -400,37 +405,69 @@ class Updater:
 
   def fetch_update(self) -> None:
     cloudlog.info("attempting git fetch inside staging overlay")
+    self.params.put("UpdaterState", "preparing...")
 
-    self.params.put("UpdaterState", "downloading...")
-
-    # TODO: cleanly interrupt this and invalidate old update
+    # 设置 Git 配置
+    setup_git_options(OVERLAY_MERGED)
+    
+    # 准备更新
     set_consistent_flag(False)
     self.params.put_bool("UpdateAvailable", False)
-
-    setup_git_options(OVERLAY_MERGED)
-
     branch = self.target_branch
-    git_fetch_output = run(["git", "fetch", "origin", branch], OVERLAY_MERGED)
-    cloudlog.info("git fetch success: %s", git_fetch_output)
 
-    cloudlog.info("git reset in progress")
+    # 使用 Popen 来获取实时进度
+    fetch_cmd = ["git", "fetch", "--progress", "origin", branch]
+    process = subprocess.Popen(
+        fetch_cmd,
+        cwd=OVERLAY_MERGED,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True
+    )
+
+    # 读取进度信息
+    while True:
+        stderr = process.stderr.readline() if process.stderr else ""
+        if stderr == "" and process.poll() is not None:
+            break
+        if stderr:
+            # 解析进度信息
+            if "Receiving objects:" in stderr:
+                try:
+                    progress = stderr.split()[2].rstrip("%")
+                    self.params.put("UpdaterState", f"downloading {progress}%")
+                except:
+                    cloudlog.exception("failed to parse git progress")
+            cloudlog.info(f"git fetch progress: {stderr.strip()}")
+
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(process.returncode, fetch_cmd)
+
+    # 继续其他更新步骤
+    self.params.put("UpdaterState", "finalizing...")
+    cloudlog.info("git fetch completed, processing update...")
+
+    # 执行其他 git 命令
     cmds = [
-      ["git", "checkout", "--force", "--no-recurse-submodules", "-B", branch, "FETCH_HEAD"],
-      ["git", "reset", "--hard"],
-      ["git", "clean", "-xdff"],
-      ["git", "submodule", "sync"],
-      ["git", "submodule", "update", "--init", "--recursive"],
-      ["git", "submodule", "foreach", "--recursive", "git", "reset", "--hard"],
+        ["git", "checkout", "--force", "--no-recurse-submodules", "-B", branch, "FETCH_HEAD"],
+        ["git", "reset", "--hard"],
+        ["git", "clean", "-xdff"],
+        ["git", "submodule", "sync"],
+        ["git", "submodule", "update", "--init", "--recursive"],
+        ["git", "submodule", "foreach", "--recursive", "git", "reset", "--hard"],
     ]
-    r = [run(cmd, OVERLAY_MERGED) for cmd in cmds]
-    cloudlog.info("git reset success: %s", '\n'.join(r))
+    
+    for cmd in cmds:
+        cloudlog.info(f"Running: {' '.join(cmd)}")
+        run(cmd, OVERLAY_MERGED)
 
+    # 处理系统更新
     if EON and not os.path.isfile("/ONEPLUS"):
-      handle_neos_update()
+        handle_neos_update()
     elif AGNOS:
-      handle_agnos_update()
+        handle_agnos_update()
 
-    # Create the finalized, ready-to-swap update
+    # 完成更新
     self.params.put("UpdaterState", "finalizing update...")
     finalize_update()
     cloudlog.info("finalize success!")
