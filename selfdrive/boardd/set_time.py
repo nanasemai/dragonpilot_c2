@@ -6,27 +6,28 @@ import datetime
 import requests
 from panda import Panda
 from openpilot.common.params import Params
-from openpilot.common.time import MIN_DATE
 import cereal.messaging as messaging
 
 PARAMS = Params()
 LAST_TIME_KEY = "LastValidTime"
+# 设置最小有效时间为2025年3月15日，使用UTC时区
+MIN_DATE_UTC = datetime.datetime(2025, 3, 15, tzinfo=datetime.timezone.utc)
 NTP_SERVERS = [
-  "ntp.aliyun.com",         # 阿里云
-  "ntp.tencent.com",        # 腾讯
-  "cn.ntp.org.cn",          # 中国 NTP 池
-  "ntp.ntsc.ac.cn"          # 中国科学院国家授时中心
+    "ntp.aliyun.com",         # 阿里云
+    "ntp.tencent.com",        # 腾讯
+    "cn.ntp.org.cn",          # 中国 NTP 池
+    "ntp.ntsc.ac.cn"          # 中国科学院国家授时中心
 ]
 
 def save_last_valid_time(time_value, logger):
-  if time_value and time_value > MIN_DATE:
-    try:
-      timestamp = int(time_value.timestamp())
-      if timestamp > 0:
-        PARAMS.put(LAST_TIME_KEY, str(timestamp))
-        logger.debug(f"已保存有效时间戳: {timestamp} ({time_value.strftime('%Y-%m-%d %H:%M:%S')})")
-    except (ValueError, TypeError, OSError) as e:
-      logger.error(f"保存时间戳失败: {str(e)}")
+    if time_value and time_value > MIN_DATE_UTC:
+        try:
+            timestamp = int(time_value.timestamp())
+            if timestamp > 0:
+                PARAMS.put(LAST_TIME_KEY, str(timestamp))
+                logger.debug(f"已保存有效时间戳: {timestamp} ({time_value.strftime('%Y-%m-%d %H:%M:%S')})")
+        except (ValueError, TypeError, OSError) as e:
+            logger.error(f"保存时间戳失败: {str(e)}")
 
 def get_ntp_time(logger):
   logger.info(f"开始尝试从 {len(NTP_SERVERS)} 个NTP服务器获取时间...")
@@ -45,28 +46,25 @@ def get_ntp_time(logger):
   return None
 
 def get_gps_time(logger):
-  try:
-    logger.info("正在尝试获取GPS时间...")
-    sm = messaging.SubMaster(['gpsLocationExternal'])
-    # 等待最多 5 秒获取 GPS 数据
-    for i in range(50):
-      sm.update()
-      if sm.updated['gpsLocationExternal'] and sm.valid['gpsLocationExternal']:
-        log = sm['gpsLocationExternal']
-        # 检查 GPS fix 是否有效
-        if log.flags % 2 != 0:
-          # GPS时间戳转换为UTC时间
-          gps_time = datetime.datetime.fromtimestamp(log.unixTimestampMillis / 1000.0, datetime.timezone.utc)
-          if gps_time and gps_time > MIN_DATE:
-            logger.info(f"GPS时间获取成功: {gps_time.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
-            return gps_time
-      if i % 10 == 0:  # 每10次循环记录一次等待信息
-        logger.debug(f"等待GPS数据... ({i/10}/5秒)")
-      time.sleep(0.1)
-    logger.warning("等待GPS数据超时")
-  except Exception as e:
-    logger.error(f"GPS时间同步失败: {str(e)}")
-  return None
+    try:
+        logger.info("正在尝试获取GPS时间...")
+        sm = messaging.SubMaster(['gpsLocationExternal'])
+        for i in range(50):
+            sm.update()
+            if sm.updated['gpsLocationExternal'] and sm.valid['gpsLocationExternal']:
+                log = sm['gpsLocationExternal']
+                if log.flags % 2 != 0:
+                    gps_time = datetime.datetime.fromtimestamp(log.unixTimestampMillis / 1000.0, datetime.timezone.utc)
+                    if gps_time and gps_time > MIN_DATE_UTC:
+                        logger.info(f"GPS时间获取成功: {gps_time.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
+                        return gps_time
+            if i % 10 == 0:
+                logger.debug(f"等待GPS数据... ({i/10}/5秒)")
+            time.sleep(0.1)
+        logger.warning("等待GPS数据超时")
+    except Exception as e:
+        logger.error(f"GPS时间同步失败: {str(e)}")
+    return None
 
 def get_last_valid_time(logger):
   try:
@@ -86,21 +84,20 @@ def get_last_valid_time(logger):
 
 def set_system_time(time_value, source, logger):
   try:
-    if time_value and time_value > MIN_DATE:
-      # 确保使用UTC时间设置系统
-      if time_value.tzinfo is None:
-        time_value = time_value.replace(tzinfo=datetime.timezone.utc)
-      time_str = time_value.astimezone(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-      logger.info(f"正在设置系统时间为 {time_str} (来源: {source})...")
-      result = os.system(f"TZ=UTC date -s '{time_str}'") == 0
-      if result:
-        logger.info(f"✓ 系统时间设置成功: {time_str} (来源: {source})")
-        save_last_valid_time(time_value, logger)
-        return True
-      else:
-        logger.error(f"✗ 设置系统时间失败 (来源: {source})")
+    if time_value and time_value > MIN_DATE_UTC:
+        if time_value.tzinfo is None:
+            time_value = time_value.replace(tzinfo=datetime.timezone.utc)
+        time_str = time_value.astimezone(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        logger.info(f"正在设置系统时间为 {time_str} (来源: {source})...")
+        result = os.system(f"TZ=UTC date -s '{time_str}'") == 0
+        if result:
+            logger.info(f"✓ 系统时间设置成功: {time_str} (来源: {source})")
+            save_last_valid_time(time_value, logger)
+            return True
+        else:
+            logger.error(f"✗ 设置系统时间失败 (来源: {source})")
     else:
-      logger.warning(f"无效的时间值 (来源: {source}): {time_value}")
+        logger.warning(f"无效的时间值 (来源: {source}): {time_value}")
     return False
   except Exception as e:
     logger.error(f"设置系统时间出错 (来源: {source}): {str(e)}")
@@ -108,9 +105,8 @@ def set_system_time(time_value, source, logger):
 
 def set_time(logger):
   logger.info("=== 开始时间同步流程 ===")
-  # 修改这里，确保系统时间包含时区信息
   sys_time = datetime.datetime.now(datetime.timezone.utc)
-  if sys_time > MIN_DATE:
+  if sys_time > MIN_DATE_UTC:
       logger.info(f"系统时间已有效: {sys_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
       save_last_valid_time(sys_time, logger)
       return
