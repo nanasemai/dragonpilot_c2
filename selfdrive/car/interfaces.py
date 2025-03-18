@@ -658,7 +658,8 @@ class CarStateBase(ABC):
     self.left_blinker_prev = left_blinker_stalk
     self.right_blinker_prev = right_blinker_stalk
 
-    return bool(left_blinker_stalk or self.left_blinker_cnt > 0), bool(right_blinker_stalk or self.right_blinker_cnt > 0)
+    return bool(left_blinker_stalk or self.left_blinker_cnt > 0), bool(
+      right_blinker_stalk or self.right_blinker_cnt > 0)
 
   @staticmethod
   def parse_gear_shifter(gear: Optional[str]) -> car.CarState.GearShifter:
@@ -708,7 +709,10 @@ INTERFACE_ATTR_FILE = {
 
 # rick - modify `Dict[str | StrEnum, Any]` to `Dict[Union[str, StrEnum], Any]` for python 3.8
 from typing import Union
-def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: bool = False) -> Dict[Union[str, StrEnum], Any]:
+
+
+def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: bool = False) -> Dict[
+  Union[str, StrEnum], Any]:
   # read all the folders in selfdrive/car and return a dict where:
   # - keys are all the car models or brand names
   # - values are attr values from all car folders
@@ -716,7 +720,8 @@ def get_interface_attr(attr: str, combine_brands: bool = False, ignore_none: boo
   for car_folder in sorted([x[0] for x in os.walk(BASEDIR + '/selfdrive/car')]):
     try:
       brand_name = car_folder.split('/')[-1]
-      brand_values = __import__(f'openpilot.selfdrive.car.{brand_name}.{INTERFACE_ATTR_FILE.get(attr, "values")}', fromlist=[attr])
+      brand_values = __import__(f'openpilot.selfdrive.car.{brand_name}.{INTERFACE_ATTR_FILE.get(attr, "values")}',
+                                fromlist=[attr])
       if hasattr(brand_values, attr) or not ignore_none:
         attr_data = getattr(brand_values, attr, None)
       else:

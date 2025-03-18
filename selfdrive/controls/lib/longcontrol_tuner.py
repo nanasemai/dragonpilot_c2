@@ -54,7 +54,20 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
 
 
 class LongControlTuner():
+  """纵向控制调谐器
+
+    功能：
+    1. 动态加载和更新PID参数
+    2. 实现纵向控制状态管理
+    3. 执行PID控制计算
+    4. 提供参数在线调整
+    """
   def __init__(self, CP):
+    """初始化控制器
+
+        参数：
+        - CP: 车辆参数配置
+        """
     self.CP = CP
     self.long_control_state = LongCtrlState.off  # initialized to off
     # PID控制相关参数
@@ -124,7 +137,14 @@ class LongControlTuner():
 
   def update(self, active, CS, long_plan, accel_limits, t_since_plan):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
-
+    """更新控制器状态和计算控制输出  
+    主要步骤：
+    1. 检查参数更新
+    2. 计算目标速度和加速度
+    3. 更新控制状态
+    4. 执行PID控制
+    """
+    # 检查参数更新
     # check update
     current_time = time.time()
     if abs(current_time - self.tuner_last_check_update) >= self.tuner_update_interval:

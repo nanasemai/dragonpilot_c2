@@ -273,7 +273,7 @@ class Controls:
     # Fix LKA BUG
     self.low_speed_steering = False
     self.LOW_SPEED_THRESHOLD = 3.0  # m/s (约11km/h) - 适应停车场低速操作
-    self.STEERING_ANGLE_THRESHOLD = 90  # degrees - 适应大角度转向需求
+    self.STEERING_ANGLE_THRESHOLD = 120  # degrees - 适应大角度转向需求
     self.STEERING_RATE_THRESHOLD = 250.0  # degrees/s - 快速转向判断阈值
     self.last_steering_angle = 0.0  # 用于计算转向角速率
 
@@ -739,7 +739,8 @@ class Controls:
     standstill = CS.vEgo <= max(self.CP.minSteerSpeed, MIN_LATERAL_CONTROL_SPEED) or CS.standstill
     CC.latActive = self.active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
                    (not standstill or self.joystick_mode)
-    
+    CC.longActive = self.enabled and not self.events.contains(ET.OVERRIDE_LONGITUDINAL) and self.CP.openpilotLongitudinalControl
+
     # rick - alka
     if (self._dp_alka and self._dp_alka_active) and not standstill and CS.cruiseState.available:
       if self.sm['liveCalibration'].calStatus != log.LiveCalibrationData.Status.calibrated:
@@ -753,8 +754,6 @@ class Controls:
         CC.latActive = False
       else:
         CC.latActive = True
-
-
 
     # rick - assist-less lane change
     if self._dp_lat_lane_change_assist_disabled:

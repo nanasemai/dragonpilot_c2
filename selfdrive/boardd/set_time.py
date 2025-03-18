@@ -108,13 +108,14 @@ def set_system_time(time_value, source, logger):
 
 def set_time(logger):
   logger.info("=== 开始时间同步流程 ===")
-  sys_time = datetime.datetime.today()
+  # 修改这里，确保系统时间包含时区信息
+  sys_time = datetime.datetime.now(datetime.timezone.utc)
   if sys_time > MIN_DATE:
-    logger.info(f"系统时间已有效: {sys_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    save_last_valid_time(sys_time, logger)
-    return
+      logger.info(f"系统时间已有效: {sys_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+      save_last_valid_time(sys_time, logger)
+      return
 
-  logger.warning(f"系统时间无效: {sys_time.strftime('%Y-%m-%d %H:%M:%S')}, 开始尝试同步...")
+  logger.warning(f"系统时间无效: {sys_time.strftime('%Y-%m-%d %H:%M:%S %Z')}, 开始尝试同步...")
 
   # 1. 尝试网络时间同步
   logger.info("【方法1】尝试网络时间同步...")

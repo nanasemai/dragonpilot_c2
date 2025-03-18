@@ -60,7 +60,20 @@ def limit_accel_in_turns(v_ego, angle_steers, a_target, CP):
 
 
 class LongitudinalPlanner:
+  """纵向运动规划器
+  主要功能：
+  1. 计算期望速度和加速度轨迹
+  2. 处理巡航控制逻辑
+  3. 实现转弯减速控制
+  4. 提供前向碰撞预警(FCW)
+  """
   def __init__(self, CP, init_v=0.0, init_a=0.0):
+    """初始化规划器
+    参数:
+    - CP: 车辆参数
+    - init_v: 初始速度
+    - init_a: 初始加速度
+    """
     # mapd
     self.cruise_source = 'cruise'
     # 控制器初始化
@@ -98,6 +111,14 @@ class LongitudinalPlanner:
     self.dp_long_use_krkeegen_tune = self.params.get_bool('dp_long_use_krkeegen_tune')
 
   def update(self, sm):
+    """更新规划器状态和计算控制输出
+    主要步骤：
+    1. 更新参数配置
+    2. 计算速度和加速度限制
+    3. 执行MPC优化
+    4. 生成控制轨迹
+    """
+    # Read params every 50 iterations
     if self.param_read_counter % 50 == 0:
       self.read_param()
 

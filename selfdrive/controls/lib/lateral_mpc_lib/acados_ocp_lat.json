@@ -228,7 +228,7 @@
         "/data/data/com.termux/files/usr/include/python3.8"
     ],
     "dims": {
-        "N": 32,
+        "N": 16,
         "nbu": 0,
         "nbx": 2,
         "nbx_0": 4,

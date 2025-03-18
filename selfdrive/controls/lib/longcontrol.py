@@ -59,8 +59,6 @@ class LongControl:
                              k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
     self.v_pid = 0.0
     self.last_output_accel = 0.0
-    self._last_speeds = None
-    self._last_t_since_plan = None
 
   def reset(self, v_pid):
     """Reset PID controller and change setpoint"""
@@ -68,14 +66,6 @@ class LongControl:
     self.v_pid = v_pid
 
   def update(self, active, CS, long_plan, accel_limits, t_since_plan):
-    # 优化插值计算，减少不必要的计算
-    if (self._last_speeds is not None and 
-        self._last_t_since_plan is not None and 
-        abs(t_since_plan - self._last_t_since_plan) < 0.01):
-      return self.last_output_accel
-      
-    self._last_speeds = long_plan.speeds
-    self._last_t_since_plan = t_since_plan
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     # Interp control trajectory
     speeds = long_plan.speeds

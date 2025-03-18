@@ -24,6 +24,8 @@ class RadarInterface(RadarInterfaceBase):
     super().__init__(CP)
     self.track_id = 0
     self.radar_ts = CP.radarTimeStep
+    self.last_update_time = 0
+    self.pts_timeout = 2.5  # 点的超时时间（秒）
 
     if CP.carFingerprint in TSS2_CAR:
       self.RADAR_A_MSGS = list(range(0x180, 0x190))
@@ -64,10 +66,15 @@ class RadarInterface(RadarInterfaceBase):
       if ii in self.RADAR_A_MSGS:
         cpt = self.rcp.vl[ii]
 
-        if cpt['LONG_DIST'] >= 255 or cpt['NEW_TRACK']:
-          self.valid_cnt[ii] = 0    # reset counter
-        if cpt['VALID'] and cpt['LONG_DIST'] < 255:
-          self.valid_cnt[ii] += 1
+        # 添加数据范围检查
+        if not (0 <= cpt['LONG_DIST'] < 255 and -50 <= cpt['LAT_DIST'] <= 50 and abs(cpt['REL_SPEED']) < 100):
+          continue
+
+        # 改进跟踪计数器逻辑
+        if cpt['NEW_TRACK'] or cpt['LONG_DIST'] >= 255:
+          self.valid_cnt[ii] = 0
+        elif cpt['VALID']:
+          self.valid_cnt[ii] = min(self.valid_cnt[ii] + 1, 10)  # 限制最大计数
         else:
           self.valid_cnt[ii] = max(self.valid_cnt[ii] - 1, 0)
 

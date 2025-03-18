@@ -65,7 +65,22 @@ def roll_pitch_adjust(roll, pitch):
   return roll * math.cos(pitch)
 
 class LatControlTorque(LatControl):
+  """基于转矩的横向控制器
+
+    主要特点：
+    1. 直接控制转向力矩而不是角度
+    2. 支持神经网络前馈控制(NNFF)
+    3. 考虑低速补偿和摩擦力补偿
+    4. 动态调整控制参数
+  """
   def __init__(self, CP, CI):
+    """初始化控制器
+
+        参数配置：
+        - torque_params: 转矩控制参数
+        - use_nnff: 是否使用神经网络前馈
+        - use_steering_angle: 是否使用方向盘角度作为反馈
+     """
     super().__init__(CP, CI)
     # 基础控制参数
     self.torque_params = CP.lateralTuning.torque
@@ -158,6 +173,15 @@ class LatControlTorque(LatControl):
       self.torque_params.friction = float(self.param_s.get("dp_torque_friction", encoding="utf8")) * 0.01 #1~50 delvalue=1
 
   def update(self, active, CS, VM, params, last_actuators, steer_limited, desired_curvature, desired_curvature_rate, llk, model_data=None):
+    """更新控制器状态和计算控制输出
+
+        主要步骤：
+        1. 计算实际和期望的横向加速度
+        2. 应用低速补偿
+        3. 计算NNFF控制量（如果启用）
+        4. 更新PID控制器
+        5. 生成最终控制输出
+    """
     self.update_live_tune()
 
     pid_log = log.ControlsState.LateralTorqueState.new_message()

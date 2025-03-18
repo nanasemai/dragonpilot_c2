@@ -23,35 +23,33 @@ JSON_FILE = os.path.join(LONG_MPC_DIR, "acados_ocp_long.json")
 
 SOURCES = ['lead0', 'lead1', 'cruise']
 
-# 基础配置参数保持不变
-X_DIM = 3
-U_DIM = 1
-PARAM_DIM = 5
+X_DIM = 3      # 状态维度：[位置, 速度, 加速度]
+U_DIM = 1      # 控制维度：[加加速度]
+PARAM_DIM = 5  # 参数维度：[最小加速度, 最大加速度, 障碍物位置, 上一次加速度, 跟车时距]
 COST_E_DIM = 5
 COST_DIM = COST_E_DIM + 1
 CONSTR_DIM = 4
-# 成本函数权重优化
-X_EGO_OBSTACLE_COST = 3   # 障碍物成本
-X_EGO_COST = 0.
-V_EGO_COST = 0.
-A_EGO_COST = 0.
-J_EGO_COST = 5           # 降低加加速度成本
-A_CHANGE_COST = 200.       # 降低加速度变化成本
-DANGER_ZONE_COST = 100.     # 降低危险区域成本
-CRASH_DISTANCE = 0.5       # 恢复默认碰撞距离
-LIMIT_COST = 1e6           # 降低限制成本
-# 优化预测步长和时域
-N = 12                      # 预测步长
-MAX_T = 10.0                # 预测时域
-# 其他参数优化
-MIN_ACCEL = -3.5          # 保持较小的最大减速度
-COMFORT_BRAKE = 2.5        # 降低舒适制动值
-STOP_DISTANCE = 5.5        # 略微减小停车距离
+
+# 成本函数权重
+X_EGO_OBSTACLE_COST = 3.   # 与障碍物距离偏差成本
+X_EGO_COST = 0.           # 位置偏差成本
+V_EGO_COST = 0.           # 速度偏差成本
+A_EGO_COST = 0.           # 加速度偏差成本
+J_EGO_COST = 5.0          # 加加速度成本
+A_CHANGE_COST = 200.      # 加速度变化成本
+DANGER_ZONE_COST = 100.   # 危险区域成本
+CRASH_DISTANCE = .5
+LIMIT_COST = 1e6
+ACADOS_SOLVER_TYPE = 'SQP_RTI'
+N = 12
+MAX_T = 10.0
+MIN_ACCEL = -3.5
+COMFORT_BRAKE = 2.5
+STOP_DISTANCE = 6.0
 
 T_IDXS_LST = [index_function(idx, max_val=MAX_T, max_idx=N) for idx in range(N+1)]
 T_IDXS = np.array(T_IDXS_LST)
 T_DIFFS = np.diff(T_IDXS, prepend=[0.])
-ACADOS_SOLVER_TYPE = 'SQP_RTI'
 
 
 def get_jerk_factor(personality=log.LongitudinalPersonality.standard):
@@ -66,65 +64,131 @@ def get_jerk_factor(personality=log.LongitudinalPersonality.standard):
 
 
 def get_T_FOLLOW(personality=log.LongitudinalPersonality.standard):
+  """获取基础跟车时距
+  该函数根据不同的驾驶风格返回对应的基础跟车时距值。
+  这个时距将被用于计算理想跟车距离，是一个重要的安全参数。
+  参数:
+    personality: 驾驶风格，包括从容(relaxed)、标准(standard)和激进(aggressive)三种模式
+  返回值:
+    float: 基础跟车时距(单位:秒)
+    - 从容模式: 1.75秒，适合保守驾驶，注重舒适性
+    - 标准模式: 1.45秒，平衡安全性和通行效率
+    - 激进模式: 1.25秒，注重通行效率，适合经验丰富的驾驶员
+
+  使用场景:
+    1. 作为静态跟车模式的直接参考值
+    2. 作为动态跟车模式的基准参考值
+    3. 用于计算安全跟车距离
+  """
   if personality==log.LongitudinalPersonality.relaxed:
-    return 1.75
+    return 1.75  # 从容模式：较大跟车时距，注重安全性和舒适性
   elif personality==log.LongitudinalPersonality.standard:
-    return 1.45
+    return 1.45  # 标准模式：平衡的跟车时距，适合日常驾驶
   elif personality==log.LongitudinalPersonality.aggressive:
-    return 1.25
+    return 1.25  # 激进模式：较小跟车时距，适合熟练驾驶员
   else:
     raise NotImplementedError("Longitudinal personality not supported")
 
 def get_dynamic_follow(v_ego, personality=log.LongitudinalPersonality.standard, curvature=0.0, rel_speed=0.0):
+  # 添加对v_ego的边界检查
   v_ego = max(0.0, min(v_ego, 40.0))  # 限制v_ego在0-40 m/s之间
   if personality==log.LongitudinalPersonality.relaxed:
+    # 调整速度区间使过渡更平滑
     x_vel =  [0.0,  3.0,  8.0,  13.90,  20,    25,    40]  # m/s
     y_dist = [1.0,  1.05, 1.15,  1.25,   1.35,  1.55,  1.7] # 秒
   elif personality==log.LongitudinalPersonality.standard:
+    # 调整速度区间使过渡更平滑，增加基础跟车时距
     x_vel =  [0.0,  3.0,  8.0,  13.90,  20,    25,    40]  # m/s
-    y_dist = [0.95, 1.00, 1.05,  1.15,   1.25,  1.35,  1.4] # 秒
+    y_dist = [0.95, 1.00, 1.05,  1.15,   1.25,  1.35,  1.4] # 秒  # 增加了基础跟车时距
   elif personality==log.LongitudinalPersonality.aggressive:
+    # 调整速度区间使过渡更平滑
     x_vel =  [0.0,  4.00, 8.0,  13.89,  20,    25,    40]  # m/s
     y_dist = [0.65, 0.70, 0.75,  0.80,   0.85,  0.95,  1.0] # 秒
   else:
     raise NotImplementedError("Dynamic Follow personality not supported")
-  return np.interp(v_ego, x_vel, y_dist)
+  # 基础跟车时距
+  base_t_follow = np.interp(v_ego, x_vel, y_dist)
+  # 道路曲率因素：弯道增加跟车距离
+  curve_factor = np.clip(1.0 + abs(curvature) * 50.0, 1.0, 1.3)
+  # 相对速度因素：
+  # - 如果前车减速(rel_speed < 0)，增加跟车距离
+  # - 如果前车加速(rel_speed > 0)，适当减少跟车距离
+  rel_speed_factor = np.clip(1.0 - rel_speed * 0.15, 0.85, 1.25)
+  # 天气因素(可选，这里默认为正常天气)
+  weather_factor = 1.0
+  # 综合计算最终跟车时距
+  final_t_follow = base_t_follow * curve_factor * rel_speed_factor * weather_factor
+  return np.clip(final_t_follow, 0.5, 2.5)  # 确保时距在安全范围内
 
 def get_stopped_equivalence_factor(v_lead):
   return (v_lead**2) / (2 * COMFORT_BRAKE)
 
+# 获取安全障碍物距离
 def get_safe_obstacle_distance(v_ego, t_follow):
   return (v_ego**2) / (2 * COMFORT_BRAKE) + t_follow * v_ego + STOP_DISTANCE
 
+# 期望跟车距离
 def desired_follow_distance(v_ego, v_lead, t_follow=get_T_FOLLOW()):
   return get_safe_obstacle_distance(v_ego, t_follow) - get_stopped_equivalence_factor(v_lead)
 
 def get_stopped_equivalence_factor_krkeegen(v_lead, v_ego):
-  # KRKeegan this offset rapidly decreases the following distance when the lead pulls
-  # away, resulting in an early demand for acceleration.
-  v_diff_offset = 0
-  if np.all(v_lead - v_ego > 0):
-    v_diff_offset = ((v_lead - v_ego) * 1.)
-    v_diff_offset = np.clip(v_diff_offset, 0, STOP_DISTANCE / 2)
-    v_diff_offset = np.maximum(v_diff_offset * ((10 - v_ego)/10), 0)
-  distance = (v_lead**2) / (2 * COMFORT_BRAKE) + v_diff_offset
-  return distance
+    """优化的停车等效距离计算
+    考虑相对速度和当前速度的动态影响
+    """
+    v_diff = v_lead - v_ego
+    v_diff_offset = 0
+
+    if np.all(v_diff > 0):
+        # 动态速度因子：高速时更保守，低速时更积极
+        speed_factor = np.clip(1.0 - (v_ego / 20.0), 0.2, 1.0)
+
+        # 相对速度影响：速度差越大，反应越积极
+        rel_speed_factor = np.clip(v_diff / 5.0, 0.0, 1.0)
+
+        # 计算偏移量
+        v_diff_offset = v_diff * speed_factor * rel_speed_factor
+
+        # 根据当前速度动态调整最大偏移量
+        max_offset = STOP_DISTANCE * (0.7 - v_ego * 0.02)  # 速度越高，允许的偏移量越小
+        v_diff_offset = np.clip(v_diff_offset, 0, max_offset)
+
+        # 平滑加速响应
+        v_diff_offset = np.maximum(v_diff_offset * ((10 - v_ego)/10), 0)
+
+    # 基础制动距离
+    base_distance = (v_lead**2) / (2 * COMFORT_BRAKE)
+
+    # 高速安全裕度
+    safety_margin = np.clip(v_ego * 0.1, 0.0, 2.0)
+
+    return base_distance + v_diff_offset + safety_margin
 
 def gen_long_model():
+  """生成纵向控制模型
+    创建包含车辆状态、控制输入和动力学方程的模型
+
+    状态变量:
+    - x_ego: 车辆纵向位置
+    - v_ego: 车辆纵向速度
+    - a_ego: 车辆纵向加速度
+
+    控制变量:
+    - j_ego: 加加速度(jerk)
+    """
   model = AcadosModel()
   model.name = MODEL_NAME
 
   # set up states & controls
-  x_ego = SX.sym('x_ego')
-  v_ego = SX.sym('v_ego')
-  a_ego = SX.sym('a_ego')
+  x_ego = SX.sym('x_ego')  # 纵向位置
+  v_ego = SX.sym('v_ego')  # 纵向速度
+  a_ego = SX.sym('a_ego')  # 纵向加速度
   model.x = vertcat(x_ego, v_ego, a_ego)
 
-  # controls
-  j_ego = SX.sym('j_ego')
+  # 定义控制输入
+  j_ego = SX.sym('j_ego')  # 加加速度
   model.u = vertcat(j_ego)
 
-  # xdot
+  # 定义状态导数
   x_ego_dot = SX.sym('x_ego_dot')
   v_ego_dot = SX.sym('v_ego_dot')
   a_ego_dot = SX.sym('a_ego_dot')
@@ -138,7 +202,7 @@ def gen_long_model():
   lead_t_follow = SX.sym('lead_t_follow')
   model.p = vertcat(a_min, a_max, x_obstacle, prev_a, lead_t_follow)
 
-  # dynamics model
+  # dynamics model 定义系统动力学方程
   f_expl = vertcat(v_ego, a_ego, j_ego)
   model.f_impl_expr = model.xdot - f_expl
   model.f_expl_expr = f_expl
@@ -239,10 +303,15 @@ def gen_long_ocp():
 
 class LongitudinalMpc:
   def __init__(self, e2e=False):
+    """初始化纵向MPC控制器
+
+        参数:
+        e2e: 是否使用端到端控制模式
+    """
     self.e2e = e2e
     self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
     self.reset()
-    self.source = SOURCES[2]
+    self.source = SOURCES[2] # 默认使用巡航控制
 
   def reset(self):
     # self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
@@ -292,7 +361,6 @@ class LongitudinalMpc:
       W[4,4] = a_change_cost * np.interp(T_IDXS[i], [0.0, 1.0, 2.0], [1.0, 1.0, 0.0])
       self.solver.cost_set(i, 'W', W)
     # Setting the slice without the copy make the array not contiguous,
-    # causing issues with the C interface.
     self.solver.cost_set(N, 'W', np.copy(W[:COST_E_DIM, :COST_E_DIM]))
 
     # Set L2 slack cost on lower bound constraints
@@ -357,21 +425,40 @@ class LongitudinalMpc:
     self.cruise_max_a = max_a
 
   def update(self, carstate, radarstate, v_cruise, personality=log.LongitudinalPersonality.standard, use_df_tune=False, use_krkeegen_tune=False):
-    # t_follow = get_T_FOLLOW(personality)
-    v_ego = self.x0[1]
-    t_follow = get_T_FOLLOW(personality) if not use_df_tune else get_dynamic_follow(v_ego, personality)
-    self.status = radarstate.leadOne.status or radarstate.leadTwo.status
+    """更新MPC控制器
 
+        参数:
+        - carstate: 车辆状态信息
+        - radarstate: 雷达探测信息
+        - v_cruise: 巡航目标速度
+        - personality: 驾驶风格
+        - use_df_tune: 是否使用动态跟车调整
+        - use_krkeegen_tune: 是否使用优化的停车距离计算
+    """
+    # 添加对carstate和radarstate的null检查
+    if not hasattr(carstate, 'steeringAngleDeg') or not hasattr(radarstate, 'leadOne') or not hasattr(radarstate, 'leadTwo'):
+        return
+    v_ego = self.x0[1]
+    # 计算相对速度和道路曲率
+    rel_speed = radarstate.leadOne.vRel if hasattr(radarstate.leadOne, 'status') and radarstate.leadOne.status else 0.0
+    curvature = abs(carstate.steeringAngleDeg * 0.017453292519943295) / (max(v_ego, 1.0) * 2.5)
+    # 获取动态跟车时距
+    t_follow = get_T_FOLLOW(personality) if not use_df_tune else get_dynamic_follow(v_ego, personality, curvature, rel_speed)
+    # 添加对leadOne和leadTwo的status属性检查
+    self.status = (hasattr(radarstate.leadOne, 'status') and radarstate.leadOne.status) or (hasattr(radarstate.leadTwo, 'status') and radarstate.leadTwo.status)
+
+    # 处理前车信息
     lead_xv_0 = self.process_lead(radarstate.leadOne)
     lead_xv_1 = self.process_lead(radarstate.leadTwo)
 
-    # set accel limits in params
+    # set accel limits in params 设置约束条件
     self.params[:,0] = interp(float(self.status), [0.0, 1.0], [self.cruise_min_a, MIN_ACCEL])
     self.params[:,1] = self.cruise_max_a
 
     # To estimate a safe distance from a moving lead, we calculate how much stopping
     # distance that lead needs as a minimum. We can add that to the current distance
     # and then treat that as a stopped car/obstacle at this new distance.
+    # 计算安全距离
     if use_krkeegen_tune:
       lead_0_obstacle = lead_xv_0[:,0] + get_stopped_equivalence_factor_krkeegen(lead_xv_0[:,1], v_ego)
       lead_1_obstacle = lead_xv_1[:,0] + get_stopped_equivalence_factor_krkeegen(lead_xv_1[:,1], v_ego)

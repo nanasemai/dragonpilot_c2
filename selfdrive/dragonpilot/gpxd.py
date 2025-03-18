@@ -26,6 +26,7 @@ class GpxD:
     self.pause = True
 
     # 确保日志目录存在
+    Path(GPX_LOG_PATH).mkdir(parents=True, exist_ok=True)
     #Path(GPX_ERRORLOGS_PATH).mkdir(parents=True, exist_ok=True)
 
     # 修改日志初始化方式，使用自定义日志目录

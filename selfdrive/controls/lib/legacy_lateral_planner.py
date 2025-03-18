@@ -28,7 +28,20 @@ STEER_RATE_COST = {
 }
 
 class LateralPlanner:
+  """横向路径规划器
+    主要功能：
+    1. 处理车道线检测结果
+    2. 计算期望行驶路径
+    3. 执行MPC优化求解
+    4. 处理换道逻辑
+    """
   def __init__(self, CP, debug=False):
+    """初始化规划器
+        组件初始化：
+        - LP: 车道规划器
+        - DH: 换道决策助手
+        - MPC: 模型预测控制器
+    """
     self.LP = LanePlanner()
     self.DH = DesireHelper()
     self.params = Params()
@@ -62,6 +75,13 @@ class LateralPlanner:
     self.lat_mpc.reset(x0=self.x0)
 
   def update(self, sm):
+    """更新规划器状态和计算控制输出
+      主要步骤：
+      1. 解析模型预测结果
+      2. 处理换道逻辑
+      3. 计算最终行驶路径
+      4. 执行MPC优化
+    """
     v_ego = sm['carState'].vEgo
     measured_curvature = sm['controlsState'].curvature
 
