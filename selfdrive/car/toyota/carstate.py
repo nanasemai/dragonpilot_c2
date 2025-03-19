@@ -1,8 +1,7 @@
 import copy
-
+import numpy as np
 from cereal import car
 from openpilot.common.conversions import Conversions as CV
-from openpilot.common.numpy_fast import mean
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_CTRL
 from opendbc.can.can_define import CANDefine
@@ -10,7 +9,6 @@ from opendbc.can.parser import CANParser
 from openpilot.selfdrive.car.interfaces import CarStateBase
 from openpilot.selfdrive.car.toyota.values import ToyotaFlags, CAR, DBC, STEER_THRESHOLD, NO_STOP_TIMER_CAR, \
   TSS2_CAR, RADAR_ACC_CAR, EPS_SCALE, UNSUPPORTED_DSU_CAR
-
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 
@@ -41,98 +39,124 @@ ZSS_THRESHOLD_COUNT = 10
 class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
+    # 初始化CAN总线定义和车辆参数
     can_define = CANDefine(DBC[CP.carFingerprint]["pt"])
-    self.shifter_values = can_define.dv["GEAR_PACKET"]["GEAR"]
-    self.eps_torque_scale = EPS_SCALE[CP.carFingerprint] / 100.
-    self.cluster_speed_hyst_gap = CV.KPH_TO_MS / 2.
-    self.cluster_min_speed = CV.KPH_TO_MS / 2.
+    if CP.flags & ToyotaFlags.SECOC.value:
+      self.shifter_values = can_define.dv["GEAR_PACKET_HYBRID"]["GEAR"]
+    else:
+      self.shifter_values = can_define.dv["GEAR_PACKET"]["GEAR"]
+    self.eps_torque_scale = EPS_SCALE[CP.carFingerprint] / 100.  # 电动助力转向扭矩比例
+    self.cluster_speed_hyst_gap = CV.KPH_TO_MS / 2.  # 仪表盘速度滞后间隙
+    self.cluster_min_speed = CV.KPH_TO_MS / 2.  # 仪表盘最小速度
+    # 添加 GVC 支持
+    self.gvc = 0.0
 
-    # On cars with cp.vl["STEER_TORQUE_SENSOR"]["STEER_ANGLE"]
-    # the signal is zeroed to where the steering angle is at start.
-    # Need to apply an offset as soon as the steering angle measurements are both received
-    # 在配备cp.vl[“STEER_TORQUE_SENSOR”][“STEER_ANGLE”]的汽车上
-    # 信号被归零到转向角开始的位置。
-    # 在收到两个转向角测量值后，需要立即应用偏移
-    self.accurate_steer_angle_seen = False
-    self.angle_offset = FirstOrderFilter(None, 60.0, DT_CTRL, initialized=False)
+    # 转向角度相关初始化
+    # 在某些车型上，转向角度信号会在启动时归零
+    # 需要在收到两个转向角度测量值后应用偏移量
+    self.accurate_steer_angle_seen = False  # 是否已获得准确的转向角度
+    self.angle_offset = FirstOrderFilter(None, 60.0, DT_CTRL, initialized=False)  # 转向角度偏移滤波器
 
-    self.prev_distance_button = 0
-    self.distance_button = 0
+    # 车距控制按钮状态
+    self.prev_distance_button = 0  # 上一次车距按钮状态
+    self.distance_button = 0  # 当前车距按钮状态
+    self.pcm_follow_distance = 0  # PCM跟车距离
 
-    self.pcm_follow_distance = 0
+    # 系统状态标志
+    self.low_speed_lockout = False  # 低速锁定标志
+    self.acc_type = 1  # ACC类型
+    self.lkas_hud = {}  # LKAS抬头显示信息
 
-    self.low_speed_lockout = False
-    self.acc_type = 1
-    self.lkas_hud = {}
-
-    # zss
+    # ZSS(零点转向传感器)相关参数
     params = Params()
-    self._dp_alka = params.get_bool('dp_alka')
-    self._dp_toyota_zss = params.get_bool('dp_toyota_zss')
-    self._dp_zss_compute = False
-    self._dp_zss_cruise_active_last = False
-    self._dp_zss_angle_offset = 0.
-    self._dp_zss_threshold_count = 0
+    self._dp_alka = params.get_bool('dp_alka')  # ALKA功能开关
+    self._dp_toyota_zss = params.get_bool('dp_toyota_zss')  # ZSS功能开关
+    self._dp_zss_compute = False  # ZSS计算标志
+    self._dp_zss_cruise_active_last = False  # 上一次巡航状态
+    self._dp_zss_angle_offset = 0.  # ZSS角度偏移
+    self._dp_zss_threshold_count = 0  # ZSS阈值计数器
 
-    # bsm
-    self.dp_toyota_enhanced_bsm = params.get_bool('dp_toyota_enhanced_bsm')
-    self._left_blindspot = False
-    self._left_blindspot_d1 = 0
-    self._left_blindspot_d2 = 0
-    self._left_blindspot_counter = 0
+    # BSM(盲点监测)相关参数
+    self.dp_toyota_enhanced_bsm = params.get_bool('dp_toyota_enhanced_bsm')  # 增强型BSM开关
+    # 左侧盲点监测
+    self._left_blindspot = False  # 左侧盲点状态
+    self._left_blindspot_d1 = 0  # 左侧盲点距离1
+    self._left_blindspot_d2 = 0  # 左侧盲点距离2
+    self._left_blindspot_counter = 0  # 左侧盲点计数器
 
-    self._right_blindspot = False
-    self._right_blindspot_d1 = 0
-    self._right_blindspot_d2 = 0
-    self._right_blindspot_counter = 0
-    # BSM 超时时间常量
-    self._BSM_COUNTER_MAX = 100
-    self._BSM_TIMEOUT = 0.5  # 秒
-    self._last_bsm_update = 0.
+    # 右侧盲点监测
+    self._right_blindspot = False  # 右侧盲点状态
+    self._right_blindspot_d1 = 0  # 右侧盲点距离1
+    self._right_blindspot_d2 = 0  # 右侧盲点距离2
+    self._right_blindspot_counter = 0  # 右侧盲点计数器
+
+    # BSM超时参数
+    self._BSM_COUNTER_MAX = 100  # BSM最大计数
+    self._BSM_TIMEOUT = 0.5  # BSM超时时间(秒)
+    self._last_bsm_update = 0.  # 最后BSM更新时间
 
 
   def update(self, cp, cp_cam):
+    """更新车辆状态
+    Args:
+        cp: 主CAN总线解析器
+        cp_cam: 相机CAN总线解析器
+    Returns:
+        ret: 更新后的车辆状态
+    """
     ret = car.CarState.new_message()
 
+    # 添加 GVC 更新
+    if not self.CP.flags & ToyotaFlags.SECOC.value:
+      self.gvc = cp.vl["VSC1S07"]["GVC"]
+
+    # 车身状态检测
     ret.doorOpen = any([cp.vl["BODY_CONTROL_STATE"]["DOOR_OPEN_FL"], cp.vl["BODY_CONTROL_STATE"]["DOOR_OPEN_FR"],
-                        cp.vl["BODY_CONTROL_STATE"]["DOOR_OPEN_RL"], cp.vl["BODY_CONTROL_STATE"]["DOOR_OPEN_RR"]])
-    ret.seatbeltUnlatched = cp.vl["BODY_CONTROL_STATE"]["SEATBELT_DRIVER_UNLATCHED"] != 0
-    ret.parkingBrake = cp.vl["BODY_CONTROL_STATE"]["PARKING_BRAKE"] == 1
+                        cp.vl["BODY_CONTROL_STATE"]["DOOR_OPEN_RL"], cp.vl["BODY_CONTROL_STATE"]["DOOR_OPEN_RR"]])  # 车门开启状态
+    ret.seatbeltUnlatched = cp.vl["BODY_CONTROL_STATE"]["SEATBELT_DRIVER_UNLATCHED"] != 0  # 安全带解开状态
+    ret.parkingBrake = cp.vl["BODY_CONTROL_STATE"]["PARKING_BRAKE"] == 1  # 驻车制动状态
 
-    ret.brakePressed = cp.vl["BRAKE_MODULE"]["BRAKE_PRESSED"] != 0
-    ret.brakeHoldActive = cp.vl["ESP_CONTROL"]["BRAKE_HOLD_ACTIVE"] == 1
+    # 制动和油门状态
+    ret.brakePressed = cp.vl["BRAKE_MODULE"]["BRAKE_PRESSED"] != 0  # 制动踏板状态
+    ret.brakeHoldActive = cp.vl["ESP_CONTROL"]["BRAKE_HOLD_ACTIVE"] == 1  # 制动保持状态
+
+    # 油门干预器状态检测
     if self.CP.enableGasInterceptor:
-      ret.gas = (cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) // 2
-      ret.gasPressed = ret.gas > 805
+      ret.gas = (cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) // 2  # 油门干预器数值
+      ret.gasPressed = ret.gas > 805  # 油门踩下状态
     else:
-      # TODO: find a common gas pedal percentage signal
-      ret.gasPressed = cp.vl["PCM_CRUISE"]["GAS_RELEASED"] == 0
+      ret.gasPressed = cp.vl["PCM_CRUISE"]["GAS_RELEASED"] == 0  # 原厂油门状态
 
+    # 车轮速度处理
     ret.wheelSpeeds = self.get_wheel_speeds(
-      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_FL"],
-      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_FR"],
-      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RL"],
-      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RR"],
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_FL"],  # 左前轮速
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_FR"],  # 右前轮速
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RL"],  # 左后轮速
+      cp.vl["WHEEL_SPEEDS"]["WHEEL_SPEED_RR"],  # 右后轮速
     )
-    # 过滤掉异常值
+
+    # 车速计算和过滤
     wheel_speeds = [ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr]
-    valid_speeds = [s for s in wheel_speeds if abs(s) < 150]  # 过滤掉不合理的速度值
-    ret.vEgoRaw = mean(valid_speeds) if valid_speeds else 0.0
-    ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
-    ret.vEgoCluster = ret.vEgo * 1.015  # minimum of all the cars
+    ret.vEgoRaw = float(np.mean([s for s in wheel_speeds if abs(s) < 150]))
+    ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)  # 经过卡尔曼滤波的车速和加速度
+    ret.vEgoCluster = ret.vEgo * 1.015  # 仪表盘显示车速
+    ret.standstill = abs(ret.vEgoRaw) < 1e-3  # 车辆静止状态
 
-    ret.standstill = abs(ret.vEgoRaw) < 1e-3
+    # 添加车辆传感器验证
+    if self.CP.steerControlType == SteerControlType.angle:
+      ret.vehicleSensorsInvalid = not self.accurate_steer_angle_seen
 
-    ret.steeringAngleDeg = cp.vl["STEER_ANGLE_SENSOR"]["STEER_ANGLE"] + cp.vl["STEER_ANGLE_SENSOR"]["STEER_FRACTION"]
-    ret.steeringRateDeg = cp.vl["STEER_ANGLE_SENSOR"]["STEER_RATE"]
-    torque_sensor_angle_deg = cp.vl["STEER_TORQUE_SENSOR"]["STEER_ANGLE"]
+    # 转向角度处理
+    ret.steeringAngleDeg = cp.vl["STEER_ANGLE_SENSOR"]["STEER_ANGLE"] + cp.vl["STEER_ANGLE_SENSOR"]["STEER_FRACTION"]  # 转向角度
+    ret.steeringRateDeg = cp.vl["STEER_ANGLE_SENSOR"]["STEER_RATE"]  # 转向角速度
+    torque_sensor_angle_deg = cp.vl["STEER_TORQUE_SENSOR"]["STEER_ANGLE"]  # 扭矩传感器角度
 
-    # On some cars, the angle measurement is non-zero while initializing
+    # 转向角度初始化和偏移处理
     if abs(torque_sensor_angle_deg) > 1e-3 and not bool(cp.vl["STEER_TORQUE_SENSOR"]["STEER_ANGLE_INITIALIZING"]):
       self.accurate_steer_angle_seen = True
 
     if self.accurate_steer_angle_seen:
-      # Offset seems to be invalid for large steering angles and high angle rates
+      # 大转向角和高角速度时不更新偏移
       if abs(ret.steeringAngleDeg) < 90 and abs(ret.steeringRateDeg) < 100 and cp.can_valid:
         self.angle_offset.update(torque_sensor_angle_deg - ret.steeringAngleDeg)
 
@@ -140,8 +164,7 @@ class CarState(CarStateBase):
         ret.steeringAngleOffsetDeg = self.angle_offset.x
         ret.steeringAngleDeg = torque_sensor_angle_deg - self.angle_offset.x
 
-    # dp - toyota zss
-    # if diff between steeringAngleDeg and ZSS is too large, disable ZSS
+    # ZSS转向角处理
     if self._dp_zss_threshold_count > ZSS_THRESHOLD_COUNT:
       self._dp_toyota_zss = False
     if self._dp_toyota_zss:
@@ -175,135 +198,163 @@ class CarState(CarStateBase):
         self._dp_toyota_zss = False
         cloudlog.exception("ZSS error")
 
-    can_gear = int(cp.vl["GEAR_PACKET"]["GEAR"])
-    ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
-    ret.leftBlinker = cp.vl["BLINKERS_STATE"]["TURN_SIGNALS"] == 1
-    ret.rightBlinker = cp.vl["BLINKERS_STATE"]["TURN_SIGNALS"] == 2
+    # 变速箱和转向信号
+    can_gear = int(cp.vl["GEAR_PACKET"]["GEAR"])  # 档位信息
+    ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))  # 档位状态
+    ret.leftBlinker = cp.vl["BLINKERS_STATE"]["TURN_SIGNALS"] == 1  # 左转向灯
+    ret.rightBlinker = cp.vl["BLINKERS_STATE"]["TURN_SIGNALS"] == 2  # 右转向灯
 
+    # 发动机转速(除Mirai外的车型)
     if self.CP.carFingerprint != CAR.MIRAI:
       ret.engineRpm = cp.vl["ENGINE_RPM"]["RPM"]
 
-    ret.steeringTorque = cp.vl["STEER_TORQUE_SENSOR"]["STEER_TORQUE_DRIVER"]
-    ret.steeringTorqueEps = cp.vl["STEER_TORQUE_SENSOR"]["STEER_TORQUE_EPS"] * self.eps_torque_scale
-    # we could use the override bit from dbc, but it's triggered at too high torque values
-    ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD
+    # 获取转向相关数据
+    ret.steeringTorque = cp.vl["STEER_TORQUE_SENSOR"]["STEER_TORQUE_DRIVER"]  # 驾驶员施加的转向扭矩
+    ret.steeringTorqueEps = cp.vl["STEER_TORQUE_SENSOR"]["STEER_TORQUE_EPS"] * self.eps_torque_scale  # EPS电机输出的转向扭矩(经过缩放)
+    # 我们可以使用dbc中的override位，但它在扭矩值太高时才触发
+    ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD  # 判断是否有方向盘转向操作
 
-    # Check EPS LKA/LTA fault status
-    ret.steerFaultTemporary = cp.vl["EPS_STATUS"]["LKA_STATE"] in TEMP_STEER_FAULTS
-    ret.steerFaultPermanent = cp.vl["EPS_STATUS"]["LKA_STATE"] in PERM_STEER_FAULTS
+    # 检查EPS LKA/LTA故障状态
+    ret.steerFaultTemporary = cp.vl["EPS_STATUS"]["LKA_STATE"] in TEMP_STEER_FAULTS  # 临时转向故障
+    ret.steerFaultPermanent = cp.vl["EPS_STATUS"]["LKA_STATE"] in PERM_STEER_FAULTS  # 永久转向故障
 
+    # 如果是角度控制类型，还需要检查LTA状态
     if self.CP.steerControlType == SteerControlType.angle:
-      ret.steerFaultTemporary = ret.steerFaultTemporary or cp.vl["EPS_STATUS"]["LTA_STATE"] in TEMP_STEER_FAULTS
-      ret.steerFaultPermanent = ret.steerFaultPermanent or cp.vl["EPS_STATUS"]["LTA_STATE"] in PERM_STEER_FAULTS
+      ret.steerFaultTemporary = ret.steerFaultTemporary or cp.vl["EPS_STATUS"]["LTA_STATE"] in TEMP_STEER_FAULTS  # 增加LTA临时故障检查
+      ret.steerFaultPermanent = ret.steerFaultPermanent or cp.vl["EPS_STATUS"]["LTA_STATE"] in PERM_STEER_FAULTS  # 增加LTA永久故障检查
 
-    if self.CP.carFingerprint in UNSUPPORTED_DSU_CAR:
-      # TODO: find the bit likely in DSU_CRUISE that describes an ACC fault. one may also exist in CLUTCH
-      ret.cruiseState.available = cp.vl["DSU_CRUISE"]["MAIN_ON"] != 0
-      ret.cruiseState.speed = cp.vl["DSU_CRUISE"]["SET_SPEED"] * CV.KPH_TO_MS
-      cluster_set_speed = cp.vl["PCM_CRUISE_ALT"]["UI_SET_SPEED"]
-    else:
-      ret.accFaulted = cp.vl["PCM_CRUISE_2"]["ACC_FAULTED"] != 0
-      ret.cruiseState.available = cp.vl["PCM_CRUISE_2"]["MAIN_ON"] != 0
-      ret.cruiseState.speed = cp.vl["PCM_CRUISE_2"]["SET_SPEED"] * CV.KPH_TO_MS
-      cluster_set_speed = cp.vl["PCM_CRUISE_SM"]["UI_SET_SPEED"]
+    # 处理不同车型的巡航控制状态
+    if self.CP.carFingerprint in UNSUPPORTED_DSU_CAR:  # 不支持DSU的车型
+      # TODO: 需要在DSU_CRUISE中找到描述ACC故障的位，可能在CLUTCH中也存在
+      ret.cruiseState.available = cp.vl["DSU_CRUISE"]["MAIN_ON"] != 0  # 巡航系统是否可用
+      ret.cruiseState.speed = cp.vl["DSU_CRUISE"]["SET_SPEED"] * CV.KPH_TO_MS  # 设定的巡航速度
+      cluster_set_speed = cp.vl["PCM_CRUISE_ALT"]["UI_SET_SPEED"]  # 仪表盘显示的设定速度
+    else:  # 支持DSU的车型
+      ret.accFaulted = cp.vl["PCM_CRUISE_2"]["ACC_FAULTED"] != 0  # ACC系统是否故障
+      ret.cruiseState.available = cp.vl["PCM_CRUISE_2"]["MAIN_ON"] != 0  # 巡航系统是否可用
+      ret.cruiseState.speed = cp.vl["PCM_CRUISE_2"]["SET_SPEED"] * CV.KPH_TO_MS  # 设定的巡航速度
+      cluster_set_speed = cp.vl["PCM_CRUISE_SM"]["UI_SET_SPEED"]  # 仪表盘显示的设定速度
 
-    # UI_SET_SPEED is always non-zero when main is on, hide until first enable
+    # 处理仪表盘速度显示
+    # UI_SET_SPEED在main开启时总是非零，所以要等到首次启用才显示
     if ret.cruiseState.speed != 0:
-      is_metric = cp.vl["BODY_CONTROL_STATE_2"]["UNITS"] in (1, 2)
-      conversion_factor = CV.KPH_TO_MS if is_metric else CV.MPH_TO_MS
-      ret.cruiseState.speedCluster = cluster_set_speed * conversion_factor
+      is_metric = cp.vl["BODY_CONTROL_STATE_2"]["UNITS"] in (1, 2)  # 判断是公制还是英制
+      conversion_factor = CV.KPH_TO_MS if is_metric else CV.MPH_TO_MS  # 选择相应的转换系数
+      ret.cruiseState.speedCluster = cluster_set_speed * conversion_factor  # 计算仪表盘显示速度
 
-    cp_acc = cp_cam if self.CP.carFingerprint in (TSS2_CAR - RADAR_ACC_CAR) else cp
+    # 确定ACC控制源
+    cp_acc = cp_cam if self.CP.carFingerprint in (TSS2_CAR - RADAR_ACC_CAR) else cp  # TSS2且无雷达ACC的车型使用相机信号
 
+    # TSS2车型的特殊处理
     if self.CP.carFingerprint in TSS2_CAR and not self.CP.flags & ToyotaFlags.DISABLE_RADAR.value:
       if not (self.CP.flags & ToyotaFlags.SMART_DSU.value):
-        self.acc_type = cp_acc.vl["ACC_CONTROL"]["ACC_TYPE"]
-      ret.stockFcw = bool(cp_acc.vl["PCS_HUD"]["FCW"])
+        self.acc_type = cp_acc.vl["ACC_CONTROL"]["ACC_TYPE"]  # 获取ACC类型
+      ret.stockFcw = bool(cp_acc.vl["PCS_HUD"]["FCW"])  # 原厂前碰撞预警系统状态
 
-    # some TSS2 cars have low speed lockout permanently set, so ignore on those cars
-    # these cars are identified by an ACC_TYPE value of 2.
-    # TODO: it is possible to avoid the lockout and gain stop and go if you
-    # send your own ACC_CONTROL msg on startup with ACC_TYPE set to 1
+    # 某些TSS2车型的低速锁定是永久设置的，这些车型通过ACC_TYPE值为2来识别
+    # 可以通过在启动时发送自定义的ACC_CONTROL消息（ACC_TYPE设为1）来避免锁定并获得停走功能
     if (self.CP.carFingerprint not in TSS2_CAR and self.CP.carFingerprint not in UNSUPPORTED_DSU_CAR) or \
       (self.CP.carFingerprint in TSS2_CAR and self.acc_type == 1):
-      self.low_speed_lockout = cp.vl["PCM_CRUISE_2"]["LOW_SPEED_LOCKOUT"] == 2
+      # 改进巡航控制故障检测
+      if self.CP.openpilotLongitudinalControl:
+          ret.accFaulted = ret.accFaulted or cp.vl["PCM_CRUISE_2"]["LOW_SPEED_LOCKOUT"] == 2
+      self.low_speed_lockout = cp.vl["PCM_CRUISE_2"]["LOW_SPEED_LOCKOUT"] == 2  # 低速锁定状态
 
-    self.pcm_acc_status = cp.vl["PCM_CRUISE"]["CRUISE_STATE"]
+    # 巡航控制状态处理
+    self.pcm_acc_status = cp.vl["PCM_CRUISE"]["CRUISE_STATE"]  # PCM-ACC状态
     if self.CP.carFingerprint not in (NO_STOP_TIMER_CAR - TSS2_CAR):
-      # ignore standstill state in certain vehicles, since pcm allows to restart with just an acceleration request
-      ret.cruiseState.standstill = self.pcm_acc_status == 7
-    ret.cruiseState.enabled = bool(cp.vl["PCM_CRUISE"]["CRUISE_ACTIVE"])
-    ret.cruiseState.nonAdaptive = cp.vl["PCM_CRUISE"]["CRUISE_STATE"] in (1, 2, 3, 4, 5, 6)
-    # dp - for pcm compensation
-    self.pcm_neutral_force = cp.vl["PCM_CRUISE"]["NEUTRAL_FORCE"]
+      # 某些车型忽略静止状态，因为PCM允许仅通过加速请求就重新启动
+      ret.cruiseState.standstill = self.pcm_acc_status == 7  # 车辆静止状态
+    ret.cruiseState.enabled = bool(cp.vl["PCM_CRUISE"]["CRUISE_ACTIVE"])  # 巡航控制是否启用
+    ret.cruiseState.nonAdaptive = cp.vl["PCM_CRUISE"]["CRUISE_STATE"] in (1, 2, 3, 4, 5, 6)  # 是否为非自适应巡航
+    # dp - PCM补偿
+    self.pcm_neutral_force = cp.vl["PCM_CRUISE"]["NEUTRAL_FORCE"]  # PCM中性力
 
-    ret.genericToggle = bool(cp.vl["LIGHT_STALK"]["AUTO_HIGH_BEAM"])
-    ret.espDisabled = cp.vl["ESP_CONTROL"]["TC_DISABLED"] != 0
+    # 其他车辆状态
+    ret.genericToggle = bool(cp.vl["LIGHT_STALK"]["AUTO_HIGH_BEAM"])  # 自动远光灯开关状态
+    ret.espDisabled = cp.vl["ESP_CONTROL"]["TC_DISABLED"] != 0  # ESP（电子稳定程序）是否禁用
 
+    # 原厂AEB（自动紧急制动）状态
     if not self.CP.enableDsu and not self.CP.flags & ToyotaFlags.DISABLE_RADAR.value:
       ret.stockAeb = bool(cp_acc.vl["PRE_COLLISION"]["PRECOLLISION_ACTIVE"] and cp_acc.vl["PRE_COLLISION"]["FORCE"] < -1e-5)
 
+    # BSM（盲点监测）状态
     if self.CP.enableBsm:
-      ret.leftBlindspot = (cp.vl["BSM"]["L_ADJACENT"] == 1) or (cp.vl["BSM"]["L_APPROACHING"] == 1)
-      ret.rightBlindspot = (cp.vl["BSM"]["R_ADJACENT"] == 1) or (cp.vl["BSM"]["R_APPROACHING"] == 1)
+      ret.leftBlindspot = (cp.vl["BSM"]["L_ADJACENT"] == 1) or (cp.vl["BSM"]["L_APPROACHING"] == 1)  # 左侧盲点
+      ret.rightBlindspot = (cp.vl["BSM"]["R_ADJACENT"] == 1) or (cp.vl["BSM"]["R_APPROACHING"] == 1)  # 右侧盲点
 
+    # LKAS HUD（抬头显示）更新
     if self.CP.carFingerprint != CAR.PRIUS_V:
-      self.lkas_hud = copy.copy(cp_cam.vl["LKAS_HUD"])
+      self.lkas_hud = copy.copy(cp_cam.vl["LKAS_HUD"])  # 车道保持辅助系统显示信息
 
-    # dp distance button
+    # dp 车距按钮处理
     if self.CP.carFingerprint not in UNSUPPORTED_DSU_CAR:
-      self.pcm_follow_distance = cp.vl["PCM_CRUISE_2"]["PCM_FOLLOW_DISTANCE"]
+      self.pcm_follow_distance = cp.vl["PCM_CRUISE_2"]["PCM_FOLLOW_DISTANCE"]  # PCM跟车距离
 
+    # TSS2无雷达ACC车型的距离按钮处理
     if self.CP.carFingerprint in (TSS2_CAR - RADAR_ACC_CAR):
-      # distance button is wired to the ACC module (camera or radar)
-      self.prev_distance_button = self.distance_button
+      # 距离按钮连接到ACC模块（相机或雷达）
+      self.prev_distance_button = self.distance_button  # 保存上一次距离按钮状态
       if self.CP.carFingerprint in (TSS2_CAR - RADAR_ACC_CAR):
-        self.distance_button = cp_acc.vl["ACC_CONTROL"]["DISTANCE"]
+        self.distance_button = cp_acc.vl["ACC_CONTROL"]["DISTANCE"]  # 更新当前距离按钮状态
 
-    # dp - acc filter - distance button logic for sdsu not radar can filter
+    # dp - acc过滤器 - 用于不带雷达的sdsu的距离按钮逻辑
     #self.prev_distance_button, self.distance_button = self.acc_filter_state.get_distance_button_states(self.prev_distance_button, self.distance_button)
 
-    # Enable blindspot debug mode once (@arne182)
-    # let's keep all the commented out code for easy debug purpose for future.
-    if self.dp_toyota_enhanced_bsm and self.frame > 199: #self.CP.carFingerprint == CAR.PRIUS_TSS2: #not (self.CP.carFingerprint in TSS2_CAR or self.CP.carFingerprint == CAR.CAMRY or self.CP.carFingerprint == CAR.CAMRYH):
-      distance_1 = cp.vl["DEBUG"].get('BLINDSPOTD1')
-      distance_2 = cp.vl["DEBUG"].get('BLINDSPOTD2')
-      side = cp.vl["DEBUG"].get('BLINDSPOTSIDE')
+    # 启用盲点调试模式（由@arne182开发）
+    # 保留注释掉的代码以便将来调试
+    if self.dp_toyota_enhanced_bsm and self.frame > 199:  # 增强型BSM功能
+      distance_1 = cp.vl["DEBUG"].get('BLINDSPOTD1')  # 盲点距离1
+      distance_2 = cp.vl["DEBUG"].get('BLINDSPOTD2')  # 盲点距离2
+      side = cp.vl["DEBUG"].get('BLINDSPOTSIDE')  # 盲点侧边指示
 
+      # 确保所有盲点监测相关数据都有效
       if distance_1 is not None and distance_2 is not None and side is not None:
-        if side == 65: # Left blind spot
+        if side == 65:  # 左侧盲点检测
+          # 当距离1发生变化时，更新数据并重置计数器
           if distance_1 != self._left_blindspot_d1:
             self._left_blindspot_d1 = distance_1
-            self._left_blindspot_counter = 100
+            self._left_blindspot_counter = 100  # 设置100个周期的检测时间
+          # 当距离2发生变化时，更新数据并重置计数器
           if distance_2 != self._left_blindspot_d2:
             self._left_blindspot_d2 = distance_2
             self._left_blindspot_counter = 100
+          # 如果任一距离大于10，表示检测到左侧盲点目标
           if self._left_blindspot_d1 > 10 or self._left_blindspot_d2 > 10:
             self._left_blindspot = True
-        elif side == 66: # Right blind spot
+
+        elif side == 66:  # 右侧盲点检测
+          # 当距离1发生变化时，更新数据并重置计数器
           if distance_1 != self._right_blindspot_d1:
             self._right_blindspot_d1 = distance_1
             self._right_blindspot_counter = 100
+          # 当距离2发生变化时，更新数据并重置计数器
           if distance_2 != self._right_blindspot_d2:
             self._right_blindspot_d2 = distance_2
             self._right_blindspot_counter = 100
+          # 如果任一距离大于10，表示检测到右侧盲点目标
           if self._right_blindspot_d1 > 10 or self._right_blindspot_d2 > 10:
             self._right_blindspot = True
 
+        # 左侧盲点计数器处理
         if self._left_blindspot_counter > 0:
-          self._left_blindspot_counter -= 1
+          self._left_blindspot_counter -= 1  # 计数器递减
         else:
+          # 计数器归零时清除左侧盲点状态
           self._left_blindspot = False
           self._left_blindspot_d1 = 0
           self._left_blindspot_d2 = 0
 
+        # 右侧盲点计数器处理
         if self._right_blindspot_counter > 0:
-          self._right_blindspot_counter -= 1
+          self._right_blindspot_counter -= 1  # 计数器递减
         else:
+          # 计数器归零时清除右侧盲点状态
           self._right_blindspot = False
           self._right_blindspot_d1 = 0
           self._right_blindspot_d2 = 0
 
+        # 更新返回值中的盲点状态
         ret.leftBlindspot = self._left_blindspot
         ret.rightBlindspot = self._right_blindspot
 
@@ -326,6 +377,13 @@ class CarState(CarStateBase):
       ("PCM_CRUISE_SM", 1),
       ("STEER_TORQUE_SENSOR", 50),
     ]
+    # 添加 SecOC 相关消息
+    if CP.flags & ToyotaFlags.SECOC.value:
+      messages += [
+        ("GEAR_PACKET_HYBRID", 60),
+        ("SECOC_SYNCHRONIZATION", 10),
+        ("GAS_PEDAL", 42),
+      ]
 
     if CP.carFingerprint != CAR.MIRAI:
       messages.append(("ENGINE_RPM", 42))

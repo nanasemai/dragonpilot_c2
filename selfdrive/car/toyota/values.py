@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from enum import Enum, IntFlag#, StrEnum
 from strenum import StrEnum
 from typing import Dict, List, Set, Union
-
 from cereal import car
 from openpilot.common.conversions import Conversions as CV
 from openpilot.selfdrive.car import AngleRateLimit, dbc_dict
@@ -12,17 +11,16 @@ from openpilot.selfdrive.car.docs_definitions import CarFootnote, CarInfo, Colum
 from openpilot.selfdrive.car.fw_query_definitions import FwQueryConfig, Request, StdQueries
 
 Ecu = car.CarParams.Ecu
-MIN_ACC_SPEED = 19. * CV.MPH_TO_MS
-PEDAL_TRANSITION = 10. * CV.MPH_TO_MS
+MIN_ACC_SPEED = 19. * CV.MPH_TO_MS # 最小ACC(自适应巡航控制)速度 - 19英里/小时转换为米/秒
+PEDAL_TRANSITION = 10. * CV.MPH_TO_MS # 踏板过渡速度 - 10英里/小时转换为米/秒
 
 
 class CarControllerParams:
-  ACCEL_MAX = 1.5  # m/s2, lower than allowed 2.0 m/s2 for tuning reasons
-  ACCEL_MIN = -3.5  # m/s2
-
-  STEER_STEP = 1
-  STEER_MAX = 1500
-  STEER_ERROR_MAX = 350     # max delta between torque cmd and torque motor
+  ACCEL_MAX = 1.5  # 最大加速度 - 1.5米/秒², 低于允许的2.0米/秒²用于调优
+  ACCEL_MIN = -3.5   # 最小加速度(最大减速度) - -3.5米/秒²
+  STEER_STEP = 1   # 转向步进值
+  STEER_MAX = 1500 # 最大转向力矩
+  STEER_ERROR_MAX = 350  # 最大转向误差 - 转向命令和实际转向力矩之间的最大差值
 
   # Lane Tracing Assist (LTA) control limits
   # Assuming a steering ratio of 13.7:
@@ -32,27 +30,55 @@ class CarControllerParams:
   # Observed internal torque rate limit on TSS 2.5 Camry and RAV4 is ~1500 units/sec up and down when using LTA
   # 车道追踪辅助（LTA）控制限制
   # 假设转向比为13.7:
-  # 在75英里/小时的速度下，限制为向上约2.0米/秒^3（7.5度/秒），向下约3.5米/秒^ 3（13度/秒
-  # 在最坏的情况下，低速限制将允许在75英里/小时的速度下向上行驶约4.0米/秒^3（15度/秒），向下行驶约4.9米/秒^ 3（18度/s），
+  # 在75英里/小时的速度下，限制为向上约2.0米/秒^3（7.5度/秒），向下约3.5米/秒^3（13度/秒）
+  # 在最坏的情况下，低速限制将允许在75英里/小时的速度下向上行驶约4.0米/秒^3（15度/秒），向下行驶约4.9米/秒^3（18度/秒），
   # 然而，EPS在所有低于该速度的速度下都有自己的内部限制：
   # 使用LTA时，TSS 2.5凯美瑞和RAV4上下观察到的内部扭矩率限制约为1500单位/秒
+  # 向上角速度限制 - 在不同速度下的转向角速度限制
   ANGLE_RATE_LIMIT_UP = AngleRateLimit(speed_bp=[5, 25], angle_v=[0.3, 0.15])
+  # 向下角速度限制 - 在不同速度下的转向角速度限制
   ANGLE_RATE_LIMIT_DOWN = AngleRateLimit(speed_bp=[5, 25], angle_v=[0.36, 0.26])
 
   def __init__(self, CP):
+    if CP.flags & ToyotaFlags.RAISED_ACCEL_LIMIT:
+      self.ACCEL_MAX = 2.0
+    else:
+      self.ACCEL_MAX = 1.5  # m/s2, lower than allowed 2.0 m/s^2 for tuning reasons
+    self.ACCEL_MIN = -3.5  # m/s2
     if CP.lateralTuning.which == 'torque':
+      # 转向力矩上升速率 - 达到峰值力矩需要1.0秒
       self.STEER_DELTA_UP = 15       # 1.0s time to peak torque
+      # 转向力矩下降速率 - 必须低于45，否则RAV4会报错(普锐斯最高可到50)
       self.STEER_DELTA_DOWN = 25     # always lower than 45 otherwise the Rav4 faults (Prius seems ok with 50)
     else:
       self.STEER_DELTA_UP = 10       # 1.5s time to peak torque
       self.STEER_DELTA_DOWN = 25     # always lower than 45 otherwise the Rav4 faults (Prius seems ok with 50)
 
 
+class ToyotaSafetyFlags(IntFlag):
+  # first byte is for EPS scaling factor
+  ALT_BRAKE = (1 << 8)
+  STOCK_LONGITUDINAL = (2 << 8)
+  LTA = (4 << 8)
+  SECOC = (8 << 8)
+
 class ToyotaFlags(IntFlag):
   HYBRID = 1
   SMART_DSU = 2
   DISABLE_RADAR = 4
-
+  # Static flags
+  TSS2 = 8
+  NO_DSU = 16
+  UNSUPPORTED_DSU = 32
+  RADAR_ACC = 64
+  # these cars use the Lane Tracing Assist (LTA) message for lateral control
+  ANGLE_CONTROL = 128
+  NO_STOP_TIMER = 256
+  # these cars are speculated to allow stop and go when the DSU is unplugged
+  SNG_WITHOUT_DSU = 512
+  # these cars can utilize 2.0 m/s^2
+  RAISED_ACCEL_LIMIT = 1024
+  SECOC = 2048
 
 class CAR(StrEnum):
   # Toyota
@@ -259,40 +285,51 @@ STATIC_DSU_MSGS = [
 
 
 def get_platform_codes(fw_versions: List[bytes]) -> Dict[bytes, Set[bytes]]:
+  """
+  获取平台代码
+  将固件版本信息解析为平台代码字典，用于在部件-平台-主版本组合内进行比较
+  """
+  # 返回子版本字典，用于在部件-平台-主版本组合内进行比较
   # Returns sub versions in a dict so comparisons can be made within part-platform-major_version combos
   codes = defaultdict(set)  # Optional[part]-platform-major_version: set of sub_version
   for fw in fw_versions:
+    # UDS查询返回的固件版本可能包含多个数据块(不同ECU校准、不同数据?)
+    # 并以一个字节作为前缀描述有多少数据块
+    # 但KWP返回的固件需要查询每个子数据ID，没有长度前缀
     # FW versions returned from UDS queries can return multiple fields/chunks of data (different ECU calibrations, different data?)
     #  and are prefixed with a byte that describes how many chunks of data there are.
     # But FW returned from KWP requires querying of each sub-data id and does not have a length prefix.
 
+    # 解析长度代码
     length_code = 1
     length_code_match = FW_LEN_CODE.search(fw)
     if length_code_match is not None:
       length_code = length_code_match.group()[0]
       fw = fw[1:]
-
+    # 固件长度应该是16字节的倍数(每个块，即使没有长度代码)，长度不符则跳过解析
     # fw length should be multiple of 16 bytes (per chunk, even if no length code), skip parsing if unexpected length
     if length_code * FW_CHUNK_LEN != len(fw):
       continue
-
+    # 分割数据块并去除填充字节
     chunks = [fw[FW_CHUNK_LEN * i:FW_CHUNK_LEN * i + FW_CHUNK_LEN].strip(b'\x00 ') for i in range(length_code)]
-
+    # 目前只考虑第一个块，因为第二个通常是共享的
     # only first is considered for now since second is commonly shared (TODO: understand that)
     first_chunk = chunks[0]
+    # 根据块长度使用不同的匹配模式
     if len(first_chunk) == 8:
+      # 短格式：没有部件号，但某些短块在后续块中有
       # TODO: no part number, but some short chunks have it in subsequent chunks
       fw_match = SHORT_FW_PATTERN.search(first_chunk)
       if fw_match is not None:
         platform, major_version, sub_version = fw_match.groups()
         codes[b'-'.join((platform, major_version))].add(sub_version)
-
+    # 中等格式
     elif len(first_chunk) == 10:
       fw_match = MEDIUM_FW_PATTERN.search(first_chunk)
       if fw_match is not None:
         part, platform, major_version, sub_version = fw_match.groups()
         codes[b'-'.join((part, platform, major_version))].add(sub_version)
-
+    # 长格式
     elif len(first_chunk) == 12:
       fw_match = LONG_FW_PATTERN.search(first_chunk)
       if fw_match is not None:
@@ -303,14 +340,21 @@ def get_platform_codes(fw_versions: List[bytes]) -> Dict[bytes, Set[bytes]]:
 
 
 def match_fw_to_car_fuzzy(live_fw_versions, offline_fw_versions) -> Set[str]:
+  """
+  模糊匹配固件版本到车型
+  比较在线和离线固件版本，找出匹配的车型
+  """
   candidates = set()
 
   for candidate, fws in offline_fw_versions.items():
+    # 跟踪通过所有检查的ECU(平台代码、子版本范围内)
     # Keep track of ECUs which pass all checks (platform codes, within sub-version range)
     valid_found_ecus = set()
+    # 获取预期应该有平台代码的ECU地址集合
     valid_expected_ecus = {ecu[1:] for ecu in fws if ecu[0] in PLATFORM_CODE_ECUS}
     for ecu, expected_versions in fws.items():
       addr = ecu[1:]
+      # 只检查预期有平台代码的ECU
       # Only check ECUs expected to have platform codes
       if ecu[0] not in PLATFORM_CODE_ECUS:
         continue
@@ -320,7 +364,9 @@ def match_fw_to_car_fuzzy(live_fw_versions, offline_fw_versions) -> Set[str]:
 
       # Found platform codes & versions
       found_platform_codes = get_platform_codes(live_fw_versions.get(addr, set()))
-
+      # 检查部件号+平台代码+主版本号是否匹配
+      # 平台代码和主版本号会随不同的物理部件、代际、API等变化
+      # 子版本号用于小型召回更新，不需要检查
       # Check part number + platform code + major version matches for any found versions
       # Platform codes and major versions change for different physical parts, generation, API, etc.
       # Sub-versions are incremented for minor recalls, do not need to be checked.
@@ -328,14 +374,23 @@ def match_fw_to_car_fuzzy(live_fw_versions, offline_fw_versions) -> Set[str]:
         break
 
       valid_found_ecus.add(addr)
-
+    # 如果所有在线ECU都通过了候选车型的所有检查，将其添加为匹配项
     # If all live ECUs pass all checks for candidate, add it as a match
     if valid_expected_ecus.issubset(valid_found_ecus):
       candidates.add(candidate)
 
   return {str(c) for c in (candidates - FUZZY_EXCLUDED_PLATFORMS)}
 
-
+# 用于从固件版本解析平台特定标识符的正则表达式模式
+# - 部件号：丰田部件号(通常需要忽略最后一个字符才能找到匹配)
+#   每个ECU地址只有一个部件号
+# - 平台：每个openpilot平台通常有多个代码，但这是变化最小的
+#   通常在ECU和年款之间共享，表示特定平台的某些特征
+#   描述更多的代际变化(TSS-P vs TSS2)或制造地区
+# - 主版本号：固件版本中第二不变的部分。用于区分按型号年份/API划分的车型
+#   如RAV4 2022/2023和Avalon。用于区分API略有变化但不是代际变化的车型
+# - 子版本号：专属于主版本号，但与其他车型共享。仅用于进一步过滤
+#   在TSB固件更新中会增加，描述其他细微差异
 # Regex patterns for parsing more general platform-specific identifiers from FW versions.
 # - Part number: Toyota part number (usually last character needs to be ignored to find a match).
 #    Each ECU address has just one part number.
@@ -354,28 +409,28 @@ LONG_FW_PATTERN = re.compile(b'(?P<part>[A-Z0-9]{5})(?P<platform>[A-Z0-9]{2})(?P
 FW_LEN_CODE = re.compile(b'^[\x01-\x03]')  # highest seen is 3 chunks, 16 bytes each
 FW_CHUNK_LEN = 16
 
-# List of ECUs that are most unique across openpilot platforms
-# - fwdCamera: describes actual features related to ADAS. For example, on the Avalon it describes
-#    when TSS-P became standard, whether the car supports stop and go, and whether it's TSS2.
-#    On the RAV4, it describes the move to the radar doing ACC, and the use of LTA for lane keeping.
-#    Note that the platform codes & major versions do not describe features in plain text, only with
-#    matching against other seen FW versions in the database they can describe features.
-# - fwdRadar: sanity check against fwdCamera, commonly shares a platform code.
-#    For example the RAV4 2022's new radar architecture is shown for both with platform code.
-# - abs: differentiates hybrid/ICE on most cars (Corolla TSS2 is an exception, not used due to hybrid platform combination)
-# - eps: describes lateral API changes for the EPS, such as using LTA for lane keeping and rejecting LKA messages
+# 列出在openpilot平台中最具特色的ECU单元
+# - fwdCamera(前置摄像头): 描述与ADAS相关的实际功能。例如，在Avalon车型上，它描述了：
+#    TSS-P何时成为标配、车辆是否支持停走功能、是否为TSS2系统。
+#    在RAV4上，它描述了雷达执行ACC的变化，以及使用LTA进行车道保持。
+#    注意：平台代码和主版本号并不直接描述功能，只能通过与数据库中其他已知固件版本匹配来推断功能。
+# - fwdRadar(前置雷达): 用于对前置摄像头进行合理性检查，通常共享相同的平台代码。
+#    例如，2022款RAV4的新雷达架构在两者的平台代码中都有体现。
+# - abs(防抱死制动系统): 用于区分大多数车型的混动/燃油版本（TSS2版本的卡罗拉是个例外，由于混合动力平台组合原因未使用）
+# - eps(电动助力转向): 描述EPS的横向控制API变化，例如使用LTA进行车道保持和拒绝LKA消息
 PLATFORM_CODE_ECUS = (Ecu.fwdCamera, Ecu.fwdRadar, Ecu.eps)
 
-# These platforms have at least one platform code for all ECUs shared with another platform.
-# rick - quick fix for error
+# 这些平台的所有ECU至少有一个与其他平台共享的平台代码
+# rick - 快速修复错误
 from typing import Set
-FUZZY_EXCLUDED_PLATFORMS: Set[CAR] = set()
+FUZZY_EXCLUDED_PLATFORMS: Set[CAR] = set()  # 模糊匹配时需要排除的平台集合
 
-# Some ECUs that use KWP2000 have their FW versions on non-standard data identifiers.
-# Toyota diagnostic software first gets the supported data ids, then queries them one by one.
-# For example, sends: 0x1a8800, receives: 0x1a8800010203, queries: 0x1a8801, 0x1a8802, 0x1a8803
-TOYOTA_VERSION_REQUEST_KWP = b'\x1a\x88\x01'
-TOYOTA_VERSION_RESPONSE_KWP = b'\x5a\x88\x01'
+# 一些使用KWP2000协议的ECU的固件版本存储在非标准数据标识符中
+# 丰田诊断软件首先获取支持的数据ID列表，然后逐个查询这些ID
+# 例如：发送请求: 0x1a8800, 接收响应: 0x1a8800010203,
+# 然后依次查询: 0x1a8801, 0x1a8802, 0x1a8803
+TOYOTA_VERSION_REQUEST_KWP = b'\x1a\x88\x01'   # KWP协议版本请求命令
+TOYOTA_VERSION_RESPONSE_KWP = b'\x5a\x88\x01'  # KWP协议版本响应命令
 
 FW_QUERY_CONFIG = FwQueryConfig(
   # TODO: look at data to whitelist new ECUs effectively
@@ -410,36 +465,42 @@ FW_QUERY_CONFIG = FwQueryConfig(
                  CAR.LEXUS_RC, CAR.LEXUS_NX, CAR.LEXUS_NX_TSS2, CAR.LEXUS_RX, CAR.LEXUS_RX_TSS2],
   },
   extra_ecus=[
-    # All known ECUs on a late-model Toyota vehicle not queried here:
-    # Responds to UDS:
-    # - HV Battery (0x713, 0x747)
-    # - Motor Generator (0x716, 0x724)
-    # - 2nd ABS "Brake/EPB" (0x730)
-    # Responds to KWP (0x1a8801):
-    # - Steering Angle Sensor (0x7b3)
-    # - EPS/EMPS (0x7a0, 0x7a1)
-    # Responds to KWP (0x1a8881):
-    # - Body Control Module ((0x750, 0x40))
+    # 以下是后期丰田车型上未在此查询的所有已知ECU:
+    # 支持UDS协议的ECU:
+    # - 混动电池 (0x713, 0x747)
+    # - 电机发电机 (0x716, 0x724)
+    # - 第二ABS"制动/EPB" (0x730)
+    # 支持KWP协议(0x1a8801)的ECU:
+    # - 转向角传感器 (0x7b3)
+    # - EPS/EMPS电动助力转向 (0x7a0, 0x7a1)
+    # 支持KWP协议(0x1a8881)的ECU:
+    # - 车身控制模块 ((0x750, 0x40))
 
-    # Hybrid control computer can be on 0x7e2 (KWP) or 0x7d2 (UDS) depending on platform
-    (Ecu.hybrid, 0x7e2, None),  # Hybrid Control Assembly & Computer
-    # TODO: if these duplicate ECUs always exist together, remove one
-    (Ecu.srs, 0x780, None),     # SRS Airbag
-    (Ecu.srs, 0x784, None),     # SRS Airbag 2
-    # Likely only exists on cars where EPB isn't standard (e.g. Camry, Avalon (/Hybrid))
-    # On some cars, EPB is controlled by the ABS module
-    (Ecu.epb, 0x750, 0x2c),     # Electronic Parking Brake
-    # This isn't accessible on all cars
-    (Ecu.gateway, 0x750, 0x5f),
-    # On some cars, this only responds to b'\x1a\x88\x81', which is reflected by the b'\x1a\x88\x00' query
-    (Ecu.telematics, 0x750, 0xc7),
-    # Transmission is combined with engine on some platforms, such as TSS-P RAV4
-    (Ecu.transmission, 0x701, None),
-    # A few platforms have a tester present response on this address, add to log
-    (Ecu.transmission, 0x7e1, None),
-    # On some cars, this only responds to b'\x1a\x88\x80'
-    (Ecu.combinationMeter, 0x7c0, None),
-    (Ecu.hvac, 0x7c4, None),
+    # 混动控制电脑可能在0x7e2(KWP)或0x7d2(UDS)地址，取决于平台
+    (Ecu.hybrid, 0x7e2, None),  # 混动系统控制总成和电脑
+
+    # TODO: 如果这些重复的ECU总是同时存在，删除其中一个
+    (Ecu.srs, 0x780, None),     # SRS安全气囊系统1
+    (Ecu.srs, 0x784, None),     # SRS安全气囊系统2
+
+    # 可能仅存在于EPB不是标配的车型(如凯美瑞、亚洲龙及其混动版)
+    # 在某些车型上，EPB由ABS模块控制
+    (Ecu.epb, 0x750, 0x2c),     # 电子驻车制动系统
+
+    # 此ECU并非所有车型都能访问
+    (Ecu.gateway, 0x750, 0x5f),  # 网关模块
+
+    # 在某些车型上，此ECU仅响应b'\x1a\x88\x81'命令，这反映在b'\x1a\x88\x00'查询中
+    (Ecu.telematics, 0x750, 0xc7),  # 远程信息处理系统
+
+    # 在某些平台上(如TSS-P的RAV4)变速箱与发动机控制合并
+    (Ecu.transmission, 0x701, None),  # 变速箱控制单元1
+    # 部分平台在此地址有测试响应，添加到日志
+    (Ecu.transmission, 0x7e1, None),  # 变速箱控制单元2
+
+    # 在某些车型上，此ECU仅响应b'\x1a\x88\x80'命令
+    (Ecu.combinationMeter, 0x7c0, None),  # 组合仪表
+    (Ecu.hvac, 0x7c4, None),  # 空调控制系统
   ],
   match_fw_to_car_fuzzy=match_fw_to_car_fuzzy,
 )
@@ -483,24 +544,25 @@ DBC = {
   CAR.LEXUS_GS_F: dbc_dict('toyota_new_mc_pt_generated', 'toyota_adas'),
 }
 
-# These cars have non-standard EPS torque scale factors. All others are 73
+# 这些车型具有非标准的EPS(电动助力转向)力矩比例因子。其他车型都是73
 EPS_SCALE = defaultdict(lambda: 73, {CAR.PRIUS: 66, CAR.COROLLA: 88, CAR.LEXUS_IS: 77, CAR.LEXUS_RC: 77, CAR.LEXUS_CTH: 100, CAR.PRIUS_V: 100})
 
-# Toyota/Lexus Safety Sense 2.0 and 2.5
+# 配备丰田/雷克萨斯Safety Sense 2.0和2.5系统的车型
 TSS2_CAR = {CAR.RAV4_TSS2, CAR.RAV4_TSS2_2022, CAR.RAV4_TSS2_2023, CAR.COROLLA_TSS2, CAR.LEXUS_ES_TSS2,
             CAR.LEXUS_RX_TSS2, CAR.HIGHLANDER_TSS2, CAR.PRIUS_TSS2, CAR.CAMRY_TSS2, CAR.LEXUS_IS_TSS2,
             CAR.MIRAI, CAR.LEXUS_NX_TSS2, CAR.ALPHARD_TSS2, CAR.AVALON_TSS2, CAR.CHR_TSS2}
 
+# 不配备DSU(驾驶辅助单元)的车型，包括所有TSS2车型和部分其他车型
 NO_DSU_CAR = TSS2_CAR | {CAR.CHR, CAR.CAMRY}
 
-# the DSU uses the AEB message for longitudinal on these cars
+# 这些车型的DSU使用AEB(自动紧急制动)消息来进行纵向控制，目前不支持
 UNSUPPORTED_DSU_CAR = {CAR.LEXUS_IS, CAR.LEXUS_RC, CAR.LEXUS_GS_F}
 
-# these cars have a radar which sends ACC messages instead of the camera
+# 这些车型使用雷达发送ACC(自适应巡航控制)消息，而不是通过摄像头
 RADAR_ACC_CAR = {CAR.RAV4_TSS2_2022, CAR.RAV4_TSS2_2023, CAR.CHR_TSS2}
 
-# these cars use the Lane Tracing Assist (LTA) message for lateral control
+# 这些车型使用LTA(车道追踪辅助)消息进行横向控制
 ANGLE_CONTROL_CAR = {CAR.RAV4_TSS2_2023}
 
-# no resume button press required
+# 这些车型在停车后重新启动时不需要按下恢复按钮
 NO_STOP_TIMER_CAR = TSS2_CAR | {CAR.PRIUS_V, CAR.RAV4H, CAR.HIGHLANDER, CAR.SIENNA}

@@ -4,6 +4,13 @@ SteerControlType = car.CarParams.SteerControlType
 
 
 def create_steer_command(packer, steer, steer_req):
+  """
+  创建转向控制指令
+  参数:
+    packer: CAN消息打包器
+    steer: 转向力矩命令值 (-1500 到 1500)
+    steer_req: 转向请求标志位
+  """
   # 添加参数验证
   if not isinstance(steer, (int, float)) or abs(steer) > 1500:  # 转向扭矩限制
     return None
@@ -17,7 +24,16 @@ def create_steer_command(packer, steer, steer_req):
 
 
 def create_lta_steer_command(packer, steer_control_type, steer_angle, steer_req, frame, torque_wind_down):
-  """Creates a CAN message for the Toyota LTA Steer Command."""
+  """
+  创建丰田 LTA (车道跟踪辅助) 转向指令
+  参数:
+    packer: CAN消息打包器
+    steer_control_type: 转向控制类型(角度控制或扭矩控制)
+    steer_angle: 目标转向角度
+    steer_req: 转向请求标志位
+    frame: 帧计数器
+    torque_wind_down: 转向力矩衰减标志
+  """
   values = {
     "COUNTER": frame + 128,
     "SETME_X1": 1,  # suspected LTA feature availability
@@ -35,6 +51,19 @@ def create_lta_steer_command(packer, steer_control_type, steer_angle, steer_req,
 
 
 def create_accel_command(packer, accel, accel_raw, pcm_cancel, standstill_req, lead, acc_type, fcw_alert, distance):
+  """
+  创建加速控制指令
+  参数:
+    packer: CAN消息打包器
+    accel: 目标加速度
+    accel_raw: 原始加速度命令
+    pcm_cancel: PCM取消标志
+    standstill_req: 静止请求标志
+    lead: 前车存在标志
+    acc_type: 自适应巡航控制类型
+    fcw_alert: 前向碰撞预警标志
+    distance: 跟车距离设置
+  """
   # TODO: find the exact canceling bit that does not create a chime
   values = {
     "ACCEL_CMD": accel,
@@ -52,6 +81,11 @@ def create_accel_command(packer, accel, accel_raw, pcm_cancel, standstill_req, l
 
 
 def create_acc_cancel_command(packer):
+  """
+  创建取消自适应巡航控制指令
+  参数:
+    packer: CAN消息打包器
+  """
   values = {
     "GAS_RELEASED": 0,
     "CRUISE_ACTIVE": 0,
@@ -64,6 +98,12 @@ def create_acc_cancel_command(packer):
 
 
 def create_fcw_command(packer, fcw):
+  """
+  创建前向碰撞预警指令
+  参数:
+    packer: CAN消息打包器
+    fcw: 前向碰撞预警状态
+  """
   values = {
     "PCS_INDICATOR": 1,  # PCS turned off
     "FCW": fcw,
@@ -76,6 +116,19 @@ def create_fcw_command(packer, fcw):
 
 
 def create_ui_command(packer, steer, chime, left_line, right_line, left_lane_depart, right_lane_depart, enabled, stock_lkas_hud):
+  """
+  创建用户界面显示指令
+  参数:
+    packer: CAN消息打包器
+    steer: 转向状态
+    chime: 提示音状态
+    left_line: 左车道线状态
+    right_line: 右车道线状态
+    left_lane_depart: 左车道偏离警告
+    right_lane_depart: 右车道偏离警告
+    enabled: 系统启用状态
+    stock_lkas_hud: 原厂LKAS显示信息
+  """
   values = {
     "TWO_BEEPS": chime,
     "LDA_ALERT": steer,
@@ -105,7 +158,6 @@ def create_ui_command(packer, steer, chime, left_line, right_line, left_lane_dep
     "ADJUSTING_CAMERA": 0,
     "LDW_EXIST": 1,
   }
-
   # lane sway functionality
   # not all cars have LKAS_HUD — update with camera values if available
   if len(stock_lkas_hud):
@@ -118,3 +170,46 @@ def create_ui_command(packer, steer, chime, left_line, right_line, left_lane_dep
     ]})
 
   return packer.make_can_msg("LKAS_HUD", 0, values)
+
+
+def create_lta_steer_command_2(packer, frame):
+  """
+  创建丰田 LTA 转向指令2
+  参数:
+    packer: CAN消息打包器
+    frame: 帧计数器
+  """
+  values = {
+    "COUNTER": frame + 128,
+  }
+  return packer.make_can_msg("STEERING_LTA_2", 0, values)
+
+def create_pcs_commands(packer, accel, active, mass):
+  """
+  创建预碰撞系统(PCS)指令
+  参数:
+    packer: CAN消息打包器
+    accel: 加速度
+    active: PCS激活状态
+    mass: 车辆质量
+  """
+  values1 = {
+    "COUNTER": 0,
+    "FORCE": round(min(accel, 0) * mass * 2),
+    "STATE": 3 if active else 0,
+    "BRAKE_STATUS": 0,
+    "PRECOLLISION_ACTIVE": 1 if active else 0,
+  }
+  msg1 = packer.make_can_msg("PRE_COLLISION", 0, values1)
+
+  values2 = {
+    "DSS1GDRV": min(accel, 0),     # 加速度
+    "PCSALM": 1 if active else 0,   # 与 PRECOLLISION_ACTIVE 同时置高
+    "IBTRGR": 1 if active else 0,   # 未知
+    "PBATRGR": 1 if active else 0,  # 噪声执行位?
+    "PREFILL": 1 if active else 0,  # 在 DSS1GDRV 之前开启和关闭
+    "AVSTRGR": 1 if active else 0,
+  }
+  msg2 = packer.make_can_msg("PRE_COLLISION_2", 0, values2)
+
+  return [msg1, msg2]

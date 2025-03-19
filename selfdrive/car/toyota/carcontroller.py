@@ -6,66 +6,76 @@ from openpilot.selfdrive.car.toyota import toyotacan
 from openpilot.selfdrive.car.toyota.values import CAR, STATIC_DSU_MSGS, NO_STOP_TIMER_CAR, TSS2_CAR, \
                                         MIN_ACC_SPEED, PEDAL_TRANSITION, CarControllerParams, ToyotaFlags, \
                                         UNSUPPORTED_DSU_CAR
+from common.realtime import DT_CTRL
 from opendbc.can.packer import CANPacker
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 
+# 类型定义
 SteerControlType = car.CarParams.SteerControlType
 VisualAlert = car.CarControl.HUDControl.VisualAlert
 LongCtrlState = car.CarControl.Actuators.LongControlState
-
-# LKA limits (lane keeping assist) 以扭矩控制，只在有需要(接近道路邊線)時修正，也就是反覆來回修正
-# EPS faults if you apply torque while the steering rate is above 100 deg/s for too long
-# 如果在转向率高于100度/秒的情况下施加扭矩的时间过长，则EPS故障
-MAX_STEER_RATE = 100  # deg/s
-MAX_STEER_RATE_FRAMES = 18  # tx control frames needed before torque can be cut
-
-# EPS allows user torque above threshold for 50 frames before permanently faulting
-# EPS允许用户在永久性故障之前将扭矩保持在阈值以上50帧
-MAX_USER_TORQUE = 500
-
-# LTA limits （Lane Tracing Assist 车道追踪辅助 ）以轉角控制，隨時進行修正，車道置中
-# EPS ignores commands above this angle and causes PCS to fault
-# EPS忽略此角度以上的命令，导致PCS故障
-MAX_LTA_ANGLE = 94.9461  # deg
-MAX_LTA_DRIVER_TORQUE_ALLOWANCE = 150  # slightly above steering pressed allows some resistance when changing lanes 稍微高于方向盘的压力会在变道时产生一些阻力
-
-# PCM compensatory force calculation threshold
-# PCM补偿力计算阈值
-# a variation in accel command is more pronounced at higher speeds, let compensatory forces ramp to zero before
-# 加速指令的变化在较高速度下更为明显，让补偿力在之前降至零
-# applying when speed is high
-# 高速时应用
-COMPENSATORY_CALCULATION_THRESHOLD_V = [-0.3, -0.25, 0.]  # m/s^2
-COMPENSATORY_CALCULATION_THRESHOLD_BP = [0., 11., 23.]  # m/s
-
-# rick - toyota auto lock / unlock
 GearShifter = car.CarState.GearShifter
-UNLOCK_CMD = b'\x40\x05\x30\x11\x00\x40\x00\x00'
-LOCK_CMD = b'\x40\x05\x30\x11\x00\x80\x00\x00'
-LOCK_AT_SPEED = 10 * CV.KPH_TO_MS
 
-# Blindspot codes
-LEFT_BLINDSPOT = b'\x41'
-RIGHT_BLINDSPOT = b'\x42'
+# 转向控制相关常量
+MAX_STEER_RATE = 100  # deg/s, EPS故障阈值，如果转向率超过此值且持续施加扭矩会触发故障
+MAX_STEER_RATE_FRAMES = 18  # 转向率超限允许的最大帧数，超过此帧数会切断扭矩输出
+MAX_USER_TORQUE = 500  # 用户转向扭矩阈值，EPS允许用户施加此阈值以上扭矩的最大帧数为50帧
+MAX_LTA_ANGLE = 94.9461  # deg, LTA系统最大转向角度，超过此角度EPS会忽略命令并导致PCS故障
+MAX_LTA_DRIVER_TORQUE_ALLOWANCE = 150  # LTA模式下允许的最大驾驶员扭矩，略高于方向盘按压力以允许变道时的阻力
 
-def set_blindspot_debug_mode(lr,enable):
-  if enable:
-    m = lr + b'\x02\x10\x60\x00\x00\x00\x00'
-  else:
-    m = lr + b'\x02\x10\x01\x00\x00\x00\x00'
-  return make_can_msg(0x750, m, 0)
+# PCM补偿计算阈值
+# 在高速时加速命令的变化更明显，让补偿力在应用前降至零
+COMPENSATORY_CALCULATION_THRESHOLD_V = [-0.3, -0.25, 0.]  # m/s^2, 加速度补偿阈值
+COMPENSATORY_CALCULATION_THRESHOLD_BP = [0., 11., 23.]  # m/s, 速度断点，用于插值计算
 
+# 自动门锁相关CAN命令和阈值
+UNLOCK_CMD = b'\x40\x05\x30\x11\x00\x40\x00\x00'  # 车门解锁CAN命令
+LOCK_CMD = b'\x40\x05\x30\x11\x00\x80\x00\x00'    # 车门上锁CAN命令
+LOCK_AT_SPEED = 10 * CV.KPH_TO_MS  # 自动上锁触发速度阈值(10km/h)
+
+# 盲点监测(BSM)相关常量
+LEFT_BLINDSPOT = b'\x41'   # 左侧BSM传感器地址标识
+RIGHT_BLINDSPOT = b'\x42'  # 右侧BSM传感器地址标识
+
+# 添加加速度限制常量
+ACCEL_WINDUP_LIMIT = 4.0 * DT_CTRL * 3  # m/s^2 / frame
+ACCEL_WINDDOWN_LIMIT = -4.0 * DT_CTRL * 3  # m/s^2 / frame
+ACCEL_PID_UNWIND = 0.03 * DT_CTRL * 3  # m/s^2 / frame
+
+# BSM辅助函数
+def set_blindspot_debug_mode(lr, enable):
+    """设置BSM调试模式
+    Args:
+        lr: 左/右BSM传感器标识
+        enable: 是否启用调试模式
+    Returns:
+        CAN消息
+    """
+    if enable:
+        m = lr + b'\x02\x10\x60\x00\x00\x00\x00'  # 启用BSM调试模式的命令
+    else:
+        m = lr + b'\x02\x10\x01\x00\x00\x00\x00'  # 禁用BSM调试模式的命令
+    return make_can_msg(0x750, m, 0)
 
 def poll_blindspot_status(lr):
-  m = lr + b'\x02\x21\x69\x00\x00\x00\x00'
-  return make_can_msg(0x750, m, 0)
+    """查询BSM状态
+    Args:
+        lr: 左/右BSM传感器标识
+    Returns:
+        CAN消息
+    """
+    m = lr + b'\x02\x21\x69\x00\x00\x00\x00'  # BSM状态查询命令
+    return make_can_msg(0x750, m, 0)
 
 class CarController:
   def __init__(self, dbc_name, CP, VM):
+    # 基本参数初始化
     self.CP = CP
     self.params = CarControllerParams(self.CP)
+    self.packer = CANPacker(dbc_name)
+    # 状态变量初始化
     self.frame = 0
     self.last_steer = 0
     self.last_angle = 0
@@ -75,11 +85,13 @@ class CarController:
     self.steer_rate_counter = 0
     self.distance_button = 0
     self.prohibit_neg_calculation = True
-
-    self.packer = CANPacker(dbc_name)
     self.gas = 0
     self.accel = 0
+    # 添加加速度控制相关变量
+    self.prev_accel = 0
+    self.permit_braking = True
 
+    # 自动门锁相关初始化
     self.dp_toyota_auto_lock_gear_prev = GearShifter.park
     self.dp_toyota_auto_lock_once = False
     p = Params()
@@ -87,12 +99,13 @@ class CarController:
     self.dp_toyota_auto_unlock = p.get_bool("dp_toyota_auto_unlock")
     self.dp_toyota_sng = p.get_bool("dp_toyota_sng")
 
-    # dp - bsm
+    # 盲点监测相关初始化
     self.dp_toyota_enhanced_bsm = p.get_bool("dp_toyota_enhanced_bsm")
     self._blindspot_debug_enabled_left = False
     self._blindspot_debug_enabled_right = False
     self._blindspot_frame = 0
 
+    # TSS2相关配置
     if self.CP.carFingerprint in TSS2_CAR: # tss2 can do higher hz then tss1 and can be on at all speed/standstill
       self._blindspot_rate = 2
       self._blindspot_always_on = True
@@ -114,64 +127,11 @@ class CarController:
     # *** control msgs ***
     can_sends = []
 
-    # dp - door auto lock / unlock logic
-    # thanks to AlexandreSato & cydia2020
-    # https://github.com/AlexandreSato/animalpilot/blob/personal/doors.py
-    try:
-      if not CS.out.doorOpen and CS.out.gearShifter is not None:
-        gear = CS.out.gearShifter
-        # 添加速度有效性检查
-        if gear == GearShifter.park and self.dp_toyota_auto_lock_gear_prev != gear and CS.out.vEgo is not None:
-          if self.dp_toyota_auto_unlock and abs(CS.out.vEgo) < 0.1:  # 静止状态才允许解锁
-            can_sends.append(make_can_msg(0x750, UNLOCK_CMD, 0))
-            self.dp_toyota_auto_lock_once = False
-        elif gear == GearShifter.drive and not self.dp_toyota_auto_lock_once and CS.out.vEgo >= LOCK_AT_SPEED:
-          if self.dp_toyota_auto_lock and not CS.out.brakePressed:  # 刹车时不自动上锁
-            can_sends.append(make_can_msg(0x750, LOCK_CMD, 0))
-            self.dp_toyota_auto_lock_once = True
-        self.dp_toyota_auto_lock_gear_prev = gear
-    except Exception as e:
-      cloudlog.exception("Error in door lock control")
-      self.dp_toyota_auto_lock_once = False  # 异常时重置状态
+    # 处理车门锁止
+    self._handle_door_locks(CS, can_sends)
 
-    # Enable blindspot debug mode once (@arne182)
-    # let's keep all the commented out code for easy debug purpose for future.
-    if self.dp_toyota_enhanced_bsm:
-      #if self.frame > 200:
-      #left bsm
-      if not self._blindspot_debug_enabled_left:
-        if (self._blindspot_always_on or (CS.out.leftBlinker and CS.out.vEgo > 6)): # eagle eye camera will stop working if right bsm is switched on under 6m/s
-          can_sends.append(set_blindspot_debug_mode(LEFT_BLINDSPOT, True))
-          self._blindspot_debug_enabled_left = True
-          # print("bsm debug left, on")
-      else:
-        if not self._blindspot_always_on and not CS.out.leftBlinker and self.frame - self._blindspot_frame > 50:
-          can_sends.append(set_blindspot_debug_mode(LEFT_BLINDSPOT, False))
-          self._blindspot_debug_enabled_left = False
-          # print("bsm debug left, off")
-        if self.frame % self._blindspot_rate == 0:
-          can_sends.append(poll_blindspot_status(LEFT_BLINDSPOT))
-          if CS.out.leftBlinker:
-            self._blindspot_frame = self.frame
-            # print(self._blindspot_frame)
-          # print("bsm poll left")
-      #right bsm
-      if not self._blindspot_debug_enabled_right:
-        if (self._blindspot_always_on or (CS.out.rightBlinker and CS.out.vEgo > 6)): # eagle eye camera will stop working if right bsm is switched on under 6m/s
-          can_sends.append(set_blindspot_debug_mode(RIGHT_BLINDSPOT, True))
-          self._blindspot_debug_enabled_right = True
-          # print("bsm debug right, on")
-      else:
-        if not self._blindspot_always_on and not CS.out.rightBlinker and self.frame - self._blindspot_frame > 50:
-          can_sends.append(set_blindspot_debug_mode(RIGHT_BLINDSPOT, False))
-          self._blindspot_debug_enabled_right = False
-          # print("bsm debug right, off")
-        if self.frame % self._blindspot_rate == self._blindspot_rate/2:
-          can_sends.append(poll_blindspot_status(RIGHT_BLINDSPOT))
-          if CS.out.rightBlinker:
-            self._blindspot_frame = self.frame
-            # print(self._blindspot_frame)
-          # print("bsm poll right")
+    # 处理盲点监测
+    self._handle_blindspot_monitoring(CS, can_sends)
 
     # *** steer torque 转向扭矩 ***
     if abs(CS.out.steeringRateDeg) > MAX_STEER_RATE + 5:  # 添加安全余量
@@ -220,19 +180,32 @@ class CarController:
     # STEERING_LTA似乎不允许通过更快的发送来获得更高的速率，最终可能会更容易
     if self.frame % 2 == 0 and self.CP.carFingerprint in TSS2_CAR:
       lta_active = lat_active and self.CP.steerControlType == SteerControlType.angle
-      # cut steering torque with TORQUE_WIND_DOWN when either EPS torque or driver torque is above
-      # the threshold, to limit max lateral acceleration and for driver torque blending respectively.
-      # 当EPS扭矩或驾驶员扭矩高于
-      # 阈值分别用于限制最大横向加速度和驾驶员扭矩混合。
-      full_torque_condition = (abs(CS.out.steeringTorqueEps) < self.params.STEER_MAX and
-                               abs(CS.out.steeringTorque) < MAX_LTA_DRIVER_TORQUE_ALLOWANCE)
 
-      # TORQUE_WIND_DOWN at 0 ramps down torque at roughly the max down rate of 1500 units/sec
-      # TORQUE_WIND_DOWN在0时以大约1500单位/秒的最大下降速率降低扭矩
-      torque_wind_down = 100 if lta_active and full_torque_condition else 0
-      can_sends.append(toyotacan.create_lta_steer_command(self.packer, self.CP.steerControlType, self.last_angle,
-                                                          lta_active, self.frame // 2, torque_wind_down))
-
+      # 改进的转向响应优化
+      if lta_active:
+        # 根据车速动态调整转向响应
+        steer_rate_limit = interp(CS.out.vEgo, [0, 10, 20], [100, 50, 25])
+        # 添加转向角速度限制
+        max_steer_rate = clip(abs(CS.out.steeringRateDeg), 0, MAX_STEER_RATE)
+        steer_rate_scale = interp(max_steer_rate, [0, MAX_STEER_RATE], [1.0, 0.5])
+        apply_angle = clip(self.last_angle * steer_rate_scale, -steer_rate_limit, steer_rate_limit)
+        
+        # 优化的扭矩渐变控制
+        full_torque_condition = (abs(CS.out.steeringTorqueEps) < self.params.STEER_MAX * 0.9 and  # 降低阈值到90%
+                               abs(CS.out.steeringTorque) < MAX_LTA_DRIVER_TORQUE_ALLOWANCE * 0.9)
+        
+        # 更平滑的扭矩渐变
+        torque_wind_down = 100 if full_torque_condition else \
+                          interp(abs(CS.out.steeringTorqueEps), 
+                                [self.params.STEER_MAX * 0.6,  # 提前开始渐变
+                                 self.params.STEER_MAX * 0.9], # 降低最大阈值
+                                [100, 0])
+      else:
+        apply_angle = CS.out.steeringAngleDeg
+        torque_wind_down = 0
+      can_sends.append(toyotacan.create_lta_steer_command(self.packer, self.CP.steerControlType,
+                                                         apply_angle, lta_active,
+                                                         self.frame // 2, torque_wind_down))
     # *** gas and brake ***
     if self.CP.enableGasInterceptor and CC.longActive:
       MAX_INTERCEPTOR_GAS = 0.5
@@ -255,6 +228,27 @@ class CarController:
     if not CC.longActive:
       self.prohibit_neg_calculation = True
     comp_thresh = interp(CS.out.vEgo, COMPENSATORY_CALCULATION_THRESHOLD_BP, COMPENSATORY_CALCULATION_THRESHOLD_V)
+
+    # 添加加速度控制逻辑
+    if self.CP.openpilotLongitudinalControl:
+      if self.frame % 3 == 0:
+        # 加速度命令限制
+        pcm_accel_cmd = actuators.accel
+        if CC.longActive:
+          # 内部PCM油门命令可能会在负加速度解除时卡住，所以我们应用一个宽松的速率限制
+          pcm_accel_cmd = clip(
+            pcm_accel_cmd - self.prev_accel,
+            ACCEL_WINDDOWN_LIMIT,
+            ACCEL_WINDUP_LIMIT
+          ) + self.prev_accel
+        self.prev_accel = pcm_accel_cmd
+
+        # 制动许可逻辑改进
+        if pcm_accel_cmd < 0.2 or stopping or not CC.longActive:
+          self.permit_braking = True
+        elif pcm_accel_cmd > 0.3:
+          self.permit_braking = False
+
     # don't reset until a reasonable compensatory value is reached
     # 在达到合理的补偿值之前，不要重置
     if CS.pcm_neutral_force > comp_thresh * self.CP.mass:
@@ -384,3 +378,54 @@ class CarController:
 
     self.frame += 1
     return new_actuators, can_sends
+
+  def _handle_door_locks(self, CS, can_sends):
+    """处理车门自动锁止/解锁逻辑"""
+    try:
+      if not CS.out.doorOpen and CS.out.gearShifter is not None:
+        gear = CS.out.gearShifter
+        if gear == GearShifter.park and self.dp_toyota_auto_lock_gear_prev != gear and CS.out.vEgo is not None:
+          if self.dp_toyota_auto_unlock and abs(CS.out.vEgo) < 0.1:
+            can_sends.append(make_can_msg(0x750, UNLOCK_CMD, 0))
+            self.dp_toyota_auto_lock_once = False
+        elif gear == GearShifter.drive and not self.dp_toyota_auto_lock_once and CS.out.vEgo >= LOCK_AT_SPEED:
+          if self.dp_toyota_auto_lock and not CS.out.brakePressed:
+            can_sends.append(make_can_msg(0x750, LOCK_CMD, 0))
+            self.dp_toyota_auto_lock_once = True
+        self.dp_toyota_auto_lock_gear_prev = gear
+    except Exception as e:
+      cloudlog.exception("Error in door lock control")
+      self.dp_toyota_auto_lock_once = False
+
+  def _handle_blindspot_monitoring(self, CS, can_sends):
+    """处理盲点监测系统(BSM)逻辑"""
+    if not self.dp_toyota_enhanced_bsm:
+      return
+
+    # 处理左侧BSM
+    if not self._blindspot_debug_enabled_left:
+      if (self._blindspot_always_on or (CS.out.leftBlinker and CS.out.vEgo > 6)):
+        can_sends.append(set_blindspot_debug_mode(LEFT_BLINDSPOT, True))
+        self._blindspot_debug_enabled_left = True
+    else:
+      if not self._blindspot_always_on and not CS.out.leftBlinker and self.frame - self._blindspot_frame > 50:
+        can_sends.append(set_blindspot_debug_mode(LEFT_BLINDSPOT, False))
+        self._blindspot_debug_enabled_left = False
+      if self.frame % self._blindspot_rate == 0:
+        can_sends.append(poll_blindspot_status(LEFT_BLINDSPOT))
+        if CS.out.leftBlinker:
+          self._blindspot_frame = self.frame
+
+    # 处理右侧BSM
+    if not self._blindspot_debug_enabled_right:
+      if (self._blindspot_always_on or (CS.out.rightBlinker and CS.out.vEgo > 6)):
+        can_sends.append(set_blindspot_debug_mode(RIGHT_BLINDSPOT, True))
+        self._blindspot_debug_enabled_right = True
+    else:
+      if not self._blindspot_always_on and not CS.out.rightBlinker and self.frame - self._blindspot_frame > 50:
+        can_sends.append(set_blindspot_debug_mode(RIGHT_BLINDSPOT, False))
+        self._blindspot_debug_enabled_right = False
+      if self.frame % self._blindspot_rate == self._blindspot_rate/2:
+        can_sends.append(poll_blindspot_status(RIGHT_BLINDSPOT))
+        if CS.out.rightBlinker:
+          self._blindspot_frame = self.frame
