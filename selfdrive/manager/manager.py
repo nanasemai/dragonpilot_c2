@@ -215,7 +215,25 @@ def manager_cleanup() -> None:
 def manager_thread() -> None:
   cloudlog.bind(daemon="manager")
   cloudlog.info("manager start")
-  cloudlog.info({"environ": os.environ})
+  # 优化环境变量输出格式
+  env_info = {
+    "系统环境": {
+      "PATH": os.environ.get("PATH", ""),
+      "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+      "BASEDIR": os.environ.get("BASEDIR", "")
+    },
+    "设备信息": {
+      "DONGLE_ID": os.environ.get("DONGLE_ID", ""),
+      "DEVICE": os.environ.get("DEVICE", "")
+    },
+    "版本信息": {
+      "GIT_ORIGIN": os.environ.get("GIT_ORIGIN", ""),
+      "GIT_BRANCH": os.environ.get("GIT_BRANCH", ""),
+      "GIT_COMMIT": os.environ.get("GIT_COMMIT", ""),
+      "CLEAN": os.environ.get("CLEAN", "0")
+    }
+  }
+  cloudlog.info(env_info)
 
   params = Params()
 

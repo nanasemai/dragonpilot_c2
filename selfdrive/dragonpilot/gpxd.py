@@ -47,9 +47,7 @@ class GpxD:
         if self.log_count > 0:
           self.lost_signal_count += 1
           if self.lost_signal_count % LOG_HERTZ == 0:
-            cloudlog.warning("GPS信号丢失",
-                           duration=f"{self.lost_signal_count/LOG_HERTZ}秒",
-                           total_lost=self.lost_signal_count)
+            cloudlog.info("GPS信号丢失",duration=f"{self.lost_signal_count/LOG_HERTZ}秒",total_lost=self.lost_signal_count)
         return
       # 记录GPS数据
       self.logs.append([

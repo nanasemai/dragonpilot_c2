@@ -128,7 +128,7 @@ def panda_sort_cmp(a: Panda, b: Panda):
 def main() -> NoReturn:
   # 设置日志模块名称
   cloudlog.bind_global(module='pandad')
-  
+
   count = 0
   first_run = True
   params = Params()
