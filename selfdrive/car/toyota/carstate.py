@@ -41,15 +41,10 @@ class CarState(CarStateBase):
     super().__init__(CP)
     # 初始化CAN总线定义和车辆参数
     can_define = CANDefine(DBC[CP.carFingerprint]["pt"])
-    if CP.flags & ToyotaFlags.SECOC.value:
-      self.shifter_values = can_define.dv["GEAR_PACKET_HYBRID"]["GEAR"]
-    else:
-      self.shifter_values = can_define.dv["GEAR_PACKET"]["GEAR"]
+    self.shifter_values = can_define.dv["GEAR_PACKET"]["GEAR"]
     self.eps_torque_scale = EPS_SCALE[CP.carFingerprint] / 100.  # 电动助力转向扭矩比例
     self.cluster_speed_hyst_gap = CV.KPH_TO_MS / 2.  # 仪表盘速度滞后间隙
     self.cluster_min_speed = CV.KPH_TO_MS / 2.  # 仪表盘最小速度
-    # 添加 GVC 支持
-    self.gvc = 0.0
 
     # 转向角度相关初始化
     # 在某些车型上，转向角度信号会在启动时归零
@@ -105,10 +100,6 @@ class CarState(CarStateBase):
         ret: 更新后的车辆状态
     """
     ret = car.CarState.new_message()
-
-    # 添加 GVC 更新
-    if not self.CP.flags & ToyotaFlags.SECOC.value:
-      self.gvc = cp.vl["VSC1S07"]["GVC"]
 
     # 车身状态检测
     ret.doorOpen = any([cp.vl["BODY_CONTROL_STATE"]["DOOR_OPEN_FL"], cp.vl["BODY_CONTROL_STATE"]["DOOR_OPEN_FR"],
@@ -377,13 +368,6 @@ class CarState(CarStateBase):
       ("PCM_CRUISE_SM", 1),
       ("STEER_TORQUE_SENSOR", 50),
     ]
-    # 添加 SecOC 相关消息
-    if CP.flags & ToyotaFlags.SECOC.value:
-      messages += [
-        ("GEAR_PACKET_HYBRID", 60),
-        ("SECOC_SYNCHRONIZATION", 10),
-        ("GAS_PEDAL", 42),
-      ]
 
     if CP.carFingerprint != CAR.MIRAI:
       messages.append(("ENGINE_RPM", 42))

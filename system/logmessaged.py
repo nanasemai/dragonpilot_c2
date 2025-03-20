@@ -20,7 +20,7 @@ def main() -> NoReturn:
       self.critical_modules = {
         'controlsd', 'pandad', 'plannerd', 'radard',
         'thermald', 'uploader', 'manager', 'locationd',
-        'modeld'  # 将 modeld 加入关键模块
+        'modeld'
       }
       self.reduced_modules = {
         'boardd': logging.WARNING,
@@ -28,17 +28,19 @@ def main() -> NoReturn:
         'camerad': logging.WARNING,
         'ui': logging.WARNING
       }
+      self.current_record = None
 
     def _should_log(self, module, log_level):
-      # GPU 相关日志始终记录
-      if 'gpu' in str(record).lower() or module == 'modeld':
+      if 'gpu' in module.lower() or module == 'modeld':
         return True
         
-      # 只记录大于2MB的错误日志
-      if len(str(record)) > 2*1024*1024:
-        return log_level >= logging.ERROR
+      try:
+        message_size = len(self.current_record) if self.current_record else 0
+        if message_size > 2*1024*1024:
+          return log_level >= logging.ERROR
+      except Exception:
+        pass
         
-      # 其他逻辑保持不变
       if log_level >= logging.ERROR:
         return True
       
@@ -51,21 +53,14 @@ def main() -> NoReturn:
       return True
     
     def fix_kv(self, k, v):
-      """处理键值对，返回格式化后的键和值"""
-      if isinstance(v, dict):
+      if isinstance(v, (dict, list, tuple, str)):
         return k, v
-      elif isinstance(v, list):
-        return k, v
-      elif isinstance(v, tuple):
-        return k, v
-      elif isinstance(v, str):
-        return k, v
-      else:
-        return k, str(v)
+      return k, str(v)
       
     def format(self, record):
       try:
-        # 处理字符串类型的记录
+        self.current_record = record
+        
         if isinstance(record, str):
           try:
             v = json.loads(record)
@@ -77,61 +72,51 @@ def main() -> NoReturn:
           except Exception as e:
             return f"Format error: {str(e)} - Raw record: {str(record)}"
 
-        # 获取日志信息
         module = v.get('module', None)
         if not module:
-          # 尝试从消息内容中提取模块名
           try:
             if isinstance(v.get('msg'), dict) and 'module' in v['msg']:
               module = v['msg']['module']
             elif 'ctx' in v and isinstance(v['ctx'], dict):
               module = v['ctx'].get('module')
             elif 'filename' in v:
-              # 从文件名提取模块名
               module = v['filename'].split('/')[-1].replace('.py', '')
           except Exception:
             pass
         
-        # 如果仍然无法获取模块名，使用默认值
         module = module or 'unknown'
         level = v.get('level', 'INFO')
         log_level = v.get('levelnum', logging.INFO)
 
-        # 处理消息内容
         try:
-          # 获取消息内容，如果没有msg键，则使用整个记录
           message_content = v.get('msg', v)
           mk, mv = self.fix_kv('msg', message_content)
           message = self._process_message(mv, module)
         except Exception as e:
-          # 如果处理失败，尝试直接使用原始记录
           try:
             message = str(v)
           except Exception:
             message = "Unable to process log message"
 
-        # 格式化时间戳
         try:
           timestamp = time.strftime('%Y-%m-%d %H:%M:%S',
                                 time.localtime(v.get('created', time.time())))
         except Exception:
           timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
 
-        # 先格式化日志
         formatted_log = f"{timestamp} | {level:7s} | {module:15s} | {message}"
         
-        # 检查是否需要记录
         if not self._should_log(module, log_level):
           return None
 
         return formatted_log
 
       except Exception as e:
-        # 如果发生任何错误，返回基本错误信息
         return f"Logging error: {str(e)} - Record: {str(record)[:200]}"
+      finally:
+        self.current_record = None
 
     def _process_message(self, message, module):
-      """处理消息内容"""
       if isinstance(message, (dict, list)):
         return json.dumps(message, ensure_ascii=False)
       return str(message)
@@ -148,34 +133,43 @@ def main() -> NoReturn:
 
   try:
     while True:
-      dat = b''.join(sock.recv_multipart())
-      level = int(dat[0])
-      record = dat[1:].decode("utf-8")
+      try:
+        dat = b''.join(sock.recv_multipart())
+        level = int(dat[0])
+        record = dat[1:].decode("utf-8")
 
-      # 格式化日志记录
-      formatted_record = log_handler.formatter.format(record)
-      if formatted_record:
-        if level >= log_level:
-          log_handler.emit(formatted_record)
+        formatted_record = log_handler.formatter.format(record)
+        if formatted_record:
+          if level >= log_level:
+            try:
+              log_handler.emit(formatted_record)
+            except Exception as e:
+              print(f"Error emitting log: {e}")
 
-        if len(formatted_record) > 2*1024*1024:
-          print("WARNING: log too big to publish", len(formatted_record))
-          print(formatted_record[:100])
-          continue
+          if len(formatted_record) > 2*1024*1024:
+            print(f"WARNING: log too big to publish: {len(formatted_record)} bytes")
+            continue
 
-        msg = messaging.new_message()
-        msg.logMessage = formatted_record
-        log_message_sock.send(msg.to_bytes())
+          try:
+            msg = messaging.new_message()
+            msg.logMessage = formatted_record
+            log_message_sock.send(msg.to_bytes())
 
-        if level >= logging.ERROR:
-          msg = messaging.new_message()
-          msg.errorLogMessage = formatted_record
-          error_log_message_sock.send(msg.to_bytes())
+            if level >= logging.ERROR:
+              msg = messaging.new_message()
+              msg.errorLogMessage = formatted_record
+              error_log_message_sock.send(msg.to_bytes())
+          except zmq.error.Again:
+            print("WARNING: Message queue full, dropping message")
+          except Exception as e:
+            print(f"Error sending message: {e}")
+      except Exception as e:
+        print(f"Error processing message: {e}")
+        time.sleep(0.1)
 
   finally:
     sock.close()
     ctx.term()
-
     try:
       log_handler.close()
     except ValueError:

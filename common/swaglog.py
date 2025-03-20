@@ -26,7 +26,7 @@ def get_file_handler():
     base_filename = os.path.join(SWAGLOG_DIR, "swaglog")
     handler = SwaglogRotatingFileHandler(
       base_filename,
-      max_bytes=1024*1024,    # 增加到1MB
+      max_bytes=512*1024,    # 增加到1MB
       interval=300,           # 5分钟
       backup_count=500        # 减少备份数量
     )
@@ -181,48 +181,6 @@ def wrap_log_method(original_method, level_name):
       # 恢复原始上下文
       if module_name and old_ctx:
         cloudlog.log_local.ctx = old_ctx
-    # 提取自定义参数
-    log_dir = kwargs.pop('log_dir', None)
-    module_name = kwargs.pop('module_name', None)
-
-    # 保存原始上下文
-    old_ctx = None
-    if module_name:
-      old_ctx = cloudlog.get_ctx().copy()
-      cloudlog.bind(module=module_name)
-
-    # 调用原始方法
-    result = original_method(msg, *args, **kwargs)
-
-    # 如果指定了日志目录，写入自定义日志
-    if log_dir:
-      # 获取当前模块名
-      current_module = module_name or cloudlog.get_ctx().get('module', 'unknown')
-
-      # 检查是否已存在该处理器
-      handler_key = f"{log_dir}:{current_module}"
-
-      if not hasattr(cloudlog, '_custom_handlers'):
-        cloudlog._custom_handlers = {}
-
-      if handler_key not in cloudlog._custom_handlers:
-        # 创建新的处理器
-        try:
-          handler = get_custom_file_handler(log_dir, current_module)
-          if handler:
-            handler.setFormatter(SwagLogFileFormatter(cloudlog))
-            cloudlog.addHandler(handler)
-            cloudlog._custom_handlers[handler_key] = handler
-        except Exception as e:
-          # 如果创建处理器失败，使用简单的文件写入方式
-          log_to_custom_dir(msg, level_name, current_module, log_dir)
-
-    # 恢复原始上下文 - 修复这里的错误
-    if module_name and old_ctx:
-      # 不要使用 cloudlog.ctx.clear()，而是使用 local_ctx
-      cloudlog.log_local.ctx = old_ctx
-
-    return result
 
   return wrapped_method
 

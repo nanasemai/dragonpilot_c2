@@ -71,11 +71,11 @@ def get_last_valid_time(logger):
     logger.info("正在获取上次保存的有效时间...")
     timestamp = PARAMS.get(LAST_TIME_KEY)
     if timestamp:
-      # 使用UTC时区处理时间戳
-      time_value = datetime.datetime.fromtimestamp(int(timestamp), datetime.timezone.utc)
+      # 使用UTC时区处理时间戳，并增加5分钟
+      time_value = datetime.datetime.fromtimestamp(int(timestamp), datetime.timezone.utc) + datetime.timedelta(minutes=5)
       # 转换为本地时间
       local_time = time_value.astimezone()
-      logger.info(f"找到上次有效时间: {local_time.strftime('%Y-%m-%d %H:%M:%S %Z')}") 
+      logger.info(f"找到上次有效时间(+5分钟): {local_time.strftime('%Y-%m-%d %H:%M:%S %Z')}") 
       return time_value  # 返回UTC时间，保持系统时间统一性
     logger.debug("未找到上次有效时间记录")
   except Exception as e:

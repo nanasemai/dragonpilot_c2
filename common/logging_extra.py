@@ -125,7 +125,7 @@ def _srcfile():
   return os.path.normcase(_tmpfunc.__code__.co_filename)
 
 class SwaglogRotatingFileHandler(BaseRotatingHandler):
-    def __init__(self, base_filename, session_id=None, module_name=None, interval=180, max_bytes=256*1024, backup_count=1000, encoding=None, error_log=False):
+    def __init__(self, base_filename, session_id=None, module_name=None, interval=300, max_bytes=512*1024, backup_count=500, encoding=None, error_log=False):
         self.base_filename = base_filename
         self.session_id = session_id or get_boot_time()
         self.module_name = module_name
@@ -282,7 +282,7 @@ def get_custom_file_handler(log_dir, module_name=None):
       base_filename,
       session_id=session_id,
       module_name=module_name,
-      max_bytes=1024*1024,    # 增加到1MB
+      max_bytes=512*1024,    # 增加到512KB
       interval=300,           # 增加到5分钟
       backup_count=500        # 减少到100个备份
     )

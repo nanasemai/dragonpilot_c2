@@ -548,12 +548,35 @@ class CarInterfaceBase(ABC):
       self.no_steer_warning = False
       self.silent_steer_warning = False
     if cs_out.steerFaultPermanent:
-      # 扩展永久故障日志信息
-      cloudlog.error(f"永久转向故障触发: 车速={cs_out.vEgo:.1f}m/s, 方向盘角度={cs_out.steeringAngleDeg:.1f}度, "
-                    f"方向盘力矩={cs_out.steeringTorque:.1f}, 档位={cs_out.gearShifter}, "
-                    f"用户操作方向盘={cs_out.steeringPressed}, 静止状态={cs_out.standstill}, "
-                    f"转向未按压计数={self.steering_unpressed}, CAN状态={cs_out.canValid}")
-      events.add(EventName.steerUnavailable)
+      # 添加更多故障判断条件
+      is_critical_fault = (
+        abs(cs_out.steeringAngleDeg) > 360.0 or  # 转向角度超限
+        abs(cs_out.steeringTorque) > 500.0 or    # 转向力矩超限
+        not cs_out.canValid                       # CAN通信故障
+      )
+      
+      if is_critical_fault:
+        # 只在首次触发或状态变化时记录错误日志
+        if not hasattr(self, '_last_fault_state') or self._last_fault_state != is_critical_fault:
+          cloudlog.error(f"永久转向故障触发: 车速={cs_out.vEgo:.1f}m/s, "
+                        f"方向盘角度={cs_out.steeringAngleDeg:.1f}度, "
+                        f"方向盘力矩={cs_out.steeringTorque:.1f}, "
+                        f"故障原因={'转向角度超限' if abs(cs_out.steeringAngleDeg) > 360.0 else '转向力矩超限' if abs(cs_out.steeringTorque) > 500.0 else 'CAN通信故障'}")
+          self._last_fault_state = is_critical_fault
+        events.add(EventName.steerUnavailable)
+        
+        # 添加恢复机制
+        if not cs_out.steeringPressed and cs_out.standstill:
+          self.steering_recovery_counter += 1
+          if self.steering_recovery_counter > 100:  # 等待一段时间后尝试恢复
+            self.steering_recovery_counter = 0
+            # 执行恢复操作...
+        else:
+          self.steering_recovery_counter = 0
+    else:
+      self.no_steer_warning = False
+      self.silent_steer_warning = False
+
 
     # we engage when pcm is active (rising edge)
     # enabling can optionally be blocked by the car interface

@@ -85,6 +85,15 @@ def get_accel_from_plan(CP, speeds, accels):
 
 
 class Controls:
+  # ALKA Control Constants
+  LOW_SPEED_THRESHOLD = 3.0  # m/s (约11km/h) - 适应停车场低速操作
+  STEERING_ANGLE_THRESHOLD = 120  # degrees - 适应大角度转向需求
+  STEERING_RATE_THRESHOLD = 250.0  # degrees/s - 快速转向判断阈值
+  PARKING_SPEED_THRESHOLD = 5.0  # m/s
+  BASE_TORQUE_THRESHOLD = 500.0  # Nm
+  MAX_TORQUE_RATE = 800.0  # Nm/s
+  SPEED_SCALE_FACTOR = 0.5
+  LOW_SPEED_FACTOR = 0.8
   def __init__(self, sm=None, pm=None, can_sock=None, CI=None):
     config_realtime_process(4 if TICI else 3, Priority.CTRL_HIGH)
 
@@ -128,6 +137,7 @@ class Controls:
     self._dp_lat_lane_change_assist_speed = int(self.params.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.MPH_TO_MS
     self._dp_lateral_road_edge_detected = self.params.get_bool("dp_lateral_road_edge_detected")
     self._dp_road_edge_timer = 0.0  # 添加计时器变量
+    self.last_steering_torque = 0.0
     self.sm = sm
     if self.sm is None:
       ignore = ['testJoystick']
@@ -272,10 +282,8 @@ class Controls:
 
     # Fix LKA BUG
     self.low_speed_steering = False
-    self.LOW_SPEED_THRESHOLD = 3.0  # m/s (约11km/h) - 适应停车场低速操作
-    self.STEERING_ANGLE_THRESHOLD = 120  # degrees - 适应大角度转向需求
-    self.STEERING_RATE_THRESHOLD = 250.0  # degrees/s - 快速转向判断阈值
     self.last_steering_angle = 0.0  # 用于计算转向角速率
+    self.last_steering_torque = 0.0  # 用于计算力矩变化率
 
   def set_initial_state(self):
     if REPLAY:
@@ -431,7 +439,7 @@ class Controls:
             self.events.add(EventName.preLaneChangeRight)
         # 更新计时器
         self._dp_road_edge_timer = max(0.0, self._dp_road_edge_timer - DT_CTRL)
-     
+
       else:
         if direction == LaneChangeDirection.left:
           self.events.add(EventName.preLaneChangeLeft)
@@ -726,50 +734,87 @@ class Controls:
     CC = car.CarControl.new_message()
     CC.enabled = self.enabled
 
-
-    # Fix ALKA
-    # 计算转向角速率
+    # ALKA Control begin
+    # 计算转向角速率和力矩变化率
     steering_rate = abs(CS.steeringAngleDeg - self.last_steering_angle) / DT_CTRL
+    torque_rate = abs(CS.steeringTorque - self.last_steering_torque) / DT_CTRL
     self.last_steering_angle = CS.steeringAngleDeg
-    # 检查低速大角度快速转向
-    self.low_speed_steering = (CS.vEgo < self.LOW_SPEED_THRESHOLD and 
-                             abs(CS.steeringAngleDeg) > self.STEERING_ANGLE_THRESHOLD and
-                             steering_rate > self.STEERING_RATE_THRESHOLD)
-    # Check which actuators can be enabled
+    self.last_steering_torque = CS.steeringTorque
+
+    # 根据车速动态调整阈值
+    speed_factor = max(1.0, CS.vEgo * self.SPEED_SCALE_FACTOR)
+    angle_threshold = self.STEERING_ANGLE_THRESHOLD / (speed_factor ** 0.5)  # 使用平方根关系
+    rate_threshold = self.STEERING_RATE_THRESHOLD * (self.LOW_SPEED_FACTOR if CS.vEgo < 2.0 else 1.0)
+    torque_threshold = self.BASE_TORQUE_THRESHOLD * (1.0 + speed_factor * 0.5)  # 非线性增长
+
+    # 检查低速大角度快速转向和异常力矩
+    steering_condition = abs(CS.steeringAngleDeg) > angle_threshold and steering_rate > rate_threshold
+    torque_condition = abs(CS.steeringTorque) > torque_threshold or torque_rate > self.MAX_TORQUE_RATE
+    self.low_speed_steering = CS.vEgo < self.LOW_SPEED_THRESHOLD and (steering_condition or torque_condition)
+
+    # 添加CAN状态和故障检查
+    can_valid = (CS.canValid and 
+                 not CS.steerFaultTemporary and 
+                 not CS.steerFaultPermanent)
+
+    # 停车和停车场模式判断
     standstill = CS.vEgo <= max(self.CP.minSteerSpeed, MIN_LATERAL_CONTROL_SPEED) or CS.standstill
-    CC.latActive = self.active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
-                   (not standstill or self.joystick_mode)
+    is_parking_speed = CS.vEgo < self.PARKING_SPEED_THRESHOLD
+    is_parking_maneuver = (CS.gearShifter == car.CarState.GearShifter.reverse or
+                          abs(CS.steeringAngleDeg) > self.STEERING_ANGLE_THRESHOLD)
+
+    CC.latActive = (self.active and 
+                   can_valid and 
+                   (not standstill or self.joystick_mode) and
+                   not self.low_speed_steering and
+                   not (is_parking_speed and is_parking_maneuver))
     CC.longActive = self.enabled and not self.events.contains(ET.OVERRIDE_LONGITUDINAL) and self.CP.openpilotLongitudinalControl
 
-    # rick - alka
+    # ALKA Control
     if (self._dp_alka and self._dp_alka_active) and not standstill and CS.cruiseState.available:
+      # 检查校准状态
       if self.sm['liveCalibration'].calStatus != log.LiveCalibrationData.Status.calibrated:
-        pass
-      elif CS.steerFaultTemporary or CS.steerFaultPermanent:
-        pass
-      elif CS.gearShifter == car.CarState.GearShifter.reverse:
-        pass
-      elif self.low_speed_steering:  # 添加低速转向检查
-        self.events.add(EventName.steerTempUnavailableCarMode)  # 添加提示事件
         CC.latActive = False
+      # 检查转向故障
+      elif CS.steerFaultTemporary or CS.steerFaultPermanent:
+        CC.latActive = False
+        self.events.add(EventName.steerTempUnavailable)
+      # 倒车检查
+      elif CS.gearShifter == car.CarState.GearShifter.reverse:
+        CC.latActive = False
+      # 低速转向检查
+      elif self.low_speed_steering:
+        CC.latActive = False
+        self.events.add(EventName.steerTempUnavailableCarMode)
+      # 停车场模式检查
+      elif is_parking_speed and is_parking_maneuver:
+        CC.latActive = False
+        self.events.add(EventName.parkingManeuver)
+      # 所有检查都通过，允许横向控制
       else:
         CC.latActive = True
+    # ALKA Control end
 
     # rick - assist-less lane change
+    # 检查是否启用了无辅助变道功能
     if self._dp_lat_lane_change_assist_disabled:
-      # de-activate
-      if not CS.leftBlinker and not CS.rightBlinker:
-        self._dp_lat_lane_change_assist_disabled_active = False
-
-      # activate
-      if not self._dp_lat_lane_change_assist_disabled_active and CS.steeringPressed and \
-        ((CS.steeringTorque > 0 and CS.leftBlinker) or
-         (CS.steeringTorque < 0 and CS.rightBlinker)):
-        self._dp_lat_lane_change_assist_disabled_active = True
-
-      if self._dp_lat_lane_change_assist_disabled_active:
-        self.events.add(EventName.laneChange)
-        CC.latActive = False
+        # 当转向灯都关闭时，重置状态
+        if not CS.leftBlinker and not CS.rightBlinker:
+            self._dp_lat_lane_change_assist_disabled_active = False
+        # 激活条件：
+        # 1. 当前未处于无辅助变道状态
+        # 2. 方向盘被按下
+        # 3. 左转向灯打开且向左转方向盘，或右转向灯打开且向右转方向盘
+        if not self._dp_lat_lane_change_assist_disabled_active and CS.steeringPressed and \
+            ((CS.steeringTorque > 0 and CS.leftBlinker) or
+            (CS.steeringTorque < 0 and CS.rightBlinker)):
+            self._dp_lat_lane_change_assist_disabled_active = True
+        # 当无辅助变道激活时：
+        # 1. 添加变道事件通知
+        # 2. 禁用横向控制
+        if self._dp_lat_lane_change_assist_disabled_active:
+            self.events.add(EventName.laneChange)
+            CC.latActive = False
 
     # rick - vag timebomb bypass
     if self._dp_vag_timebomb_bypass:

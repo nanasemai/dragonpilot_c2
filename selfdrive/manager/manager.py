@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import datetime
+import time
 import os
 import signal
 import subprocess
@@ -107,6 +108,9 @@ def manager_init() -> None:
     ("dp_fleet_fileserv", "0"),
     ("dp_dev_ui_info", "0"),
     ("dp_upload_on", "0"),
+    ("dp_device_display_off_mode", "0"),
+    # 添加换道中止检查参数
+    ("dp_lat_lane_change_abort_check", "0"),
   ]
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))
@@ -258,15 +262,32 @@ def manager_thread() -> None:
   ensure_running(managed_processes.values(), False, params=params, CP=sm['carParams'], not_run=ignore)
 
   started_prev = False
+  last_time_save = 0  # 添加时间保存计数器
   while True:
     sm.update(1000)
-    
+
+    started = sm['deviceState'].started
+    current_time = int(time.time())
+
     # 检查网络状态变化时更新时间
     if sm.updated['deviceState']:
       current_network = sm['deviceState'].networkType
       if current_network != last_network_type and current_network != log.DeviceState.NetworkType.none:
         set_time(cloudlog)
       last_network_type = current_network
+
+    # 在以下情况保存时间：
+    # 1. 每5分钟保存一次基础时间
+    # 2. 网络连接成功时
+    # 3. 进入或退出行驶状态时
+    if (current_time - last_time_save >= 300 or  # 5分钟
+        (sm.updated['deviceState'] and sm['deviceState'].networkType != last_network_type) or
+        started != started_prev):
+      try:
+        params.put("LastValidTime", str(current_time))
+        last_time_save = current_time
+      except Exception as e:
+        cloudlog.warning(f"保存系统时间失败: {str(e)}")
 
     # 添加进程状态监控
     process_states = {}
@@ -284,8 +305,6 @@ def manager_thread() -> None:
         cloudlog.error(f"Process {name} died with exitcode {state['exitcode']}")
         if state['restart_count'] > 3:
           cloudlog.error(f"Process {name} restarted too many times")
-
-    started = sm['deviceState'].started
 
     if started and not started_prev:
       params.clear_all(ParamKeyType.CLEAR_ON_ONROAD_TRANSITION)

@@ -679,7 +679,7 @@ EVENTS: Dict[int, Dict[str, Union[Alert, AlertCallbackType]]] = {
       _("道路检测到边缘"),
       _(""),
       AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.prompt, 1.),# 单次提醒持续时间设为0.1秒
+      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.prompt, 1.),# 单次提醒持续时间设为1秒
   },
 
   EventName.steerTimeLimit: {
