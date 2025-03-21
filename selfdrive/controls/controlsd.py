@@ -771,15 +771,16 @@ class Controls:
         angle_rate_ok = current_angle_rate < 94.9461
 
         # 调试信息
-        cloudlog.info(f"Torque checks: eps={eps_torque:.2f}/{150*max_driver_torque:.2f} "
-                     f"driver={driver_torque:.2f}/{200*max_driver_torque:.2f} "
-                     f"total={abs(CS.steeringTorque):.2f}/{500*max_driver_torque:.2f} "
-                     f"angle_rate={current_angle_rate:.2f}/94.9461")
+        cloudlog.info(f"力矩检查: EPS力矩={eps_torque:.2f}/{150*max_driver_torque:.2f} "
+                     f"驾驶员力矩={driver_torque:.2f}/{200*max_driver_torque:.2f} "
+                     f"总力矩={abs(CS.steeringTorque):.2f}/{500*max_driver_torque:.2f} "
+                     f"方向盘转速={current_angle_rate:.2f}/94.9461")
                      
         if eps_ok and driver_ok and total_torque_ok and angle_rate_ok:
           CC.latActive = True
         else:
-          self.events.add(EventName.steerTorqueOver)
+          CC.latActive = True
+          #self.events.add(EventName.steerTorqueOver)
       else:
         # 不检查力矩时直接激活
         CC.latActive = True

@@ -530,7 +530,15 @@ class CarInterfaceBase(ABC):
 
     # 永久性转向故障
     if cs_out.steerFaultPermanent:
-        events.add(EventName.steerUnavailable)
+      cloudlog.error("永久性转向故障触发:", 
+                      " 车速:", cs_out.vEgo * 3.6,  # 转换为km/h
+                      " EPS力矩:", cs_out.steeringTorqueEps,
+                      " 驾驶员力矩:", cs_out.steeringTorque - cs_out.steeringTorqueEps,
+                      " 总力矩:", cs_out.steeringTorque,
+                      " 方向盘角度:", cs_out.steeringAngleDeg,
+                      " 方向盘转速:", abs(cs_out.steeringRateDeg),
+                      " 横向加速度:", cs_out.lateralAccel)
+      events.add(EventName.steerUnavailable)
 
     # we engage when pcm is active (rising edge)
     # enabling can optionally be blocked by the car interface
