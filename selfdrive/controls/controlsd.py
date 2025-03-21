@@ -30,7 +30,7 @@ from openpilot.selfdrive.controls.lib.alertmanager import AlertManager, set_offr
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
 from openpilot.system.hardware import HARDWARE, TICI
 from openpilot.selfdrive.hybrid_modeld.constants import ModelConstants
-from openpilot.common.swaglog import cloudlog, add_file_handler
+from openpilot.common.swaglog import cloudlog
 from pathlib import Path
 
 SOFT_DISABLE_TIME = 3  # seconds
@@ -76,7 +76,7 @@ CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 # CONTROLS_LOG_DIR = "/data/media/0/c2_logs/controls_log"
 # Path(CONTROLS_LOG_DIR).mkdir(parents=True, exist_ok=True)
 # cloudlog.bind_global(module='Controls')
-# add_file_handler(cloudlog, CONTROLS_LOG_DIR, "Controls")
+
 
 def get_accel_from_plan(CP, speeds, accels):
   if len(speeds) == CONTROL_N and len(accels) == CONTROL_N:
@@ -735,11 +735,11 @@ class Controls:
     # Check which actuators can be enabled
     # 判断车辆是否处于静止状态：车速低于最小转向速度或车辆完全静止
     standstill = CS.vEgo <= max(self.CP.minSteerSpeed, MIN_LATERAL_CONTROL_SPEED) or CS.standstill
-    
+
     # 设置横向控制激活条件：系统激活 + 无转向故障 + (非静止状态或游戏手柄模式)
     CC.latActive = self.active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
                    (not standstill or self.joystick_mode)
-    
+
     # 设置纵向控制激活条件：系统已启用 + 无纵向控制覆盖 + 开启了openpilot纵向控制
     CC.longActive = self.enabled and not self.events.contains(ET.OVERRIDE_LONGITUDINAL) and self.CP.openpilotLongitudinalControl
 
@@ -756,19 +756,19 @@ class Controls:
 
       if self._dp_alka_torque_check:
         # 原有的力矩检查逻辑
-        max_driver_torque = interp(CS.vEgo, 
+        max_driver_torque = interp(CS.vEgo,
                                 [0, 5, 10, 20],  # m/s
                                 [1.0, 0.8, 0.65, 0.5])  # 力矩系数
         eps_torque = abs(CS.steeringTorqueEps)
         driver_torque = abs(CS.steeringTorque - CS.steeringTorqueEps)
-        
+
         eps_ok = eps_torque < (150 * max_driver_torque)
         driver_ok = driver_torque < (200 * max_driver_torque)
         total_torque_ok = abs(CS.steeringTorque) < (500 * max_driver_torque)
-        
+
         current_angle_rate = abs(CS.steeringAngleDeg - self.last_steering_angle) / DT_CTRL
         angle_rate_ok = current_angle_rate < 94.9461
-        
+
         if eps_ok and driver_ok and total_torque_ok and angle_rate_ok:
           CC.latActive = True
         else:
