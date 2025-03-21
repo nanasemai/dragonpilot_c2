@@ -755,6 +755,7 @@ class Controls:
         CS.gearShifter != car.CarState.GearShifter.reverse):  # 非倒车状态
 
       if self._dp_alka_torque_check:
+        
         # 原有的力矩检查逻辑
         max_driver_torque = interp(CS.vEgo,
                                 [0, 5, 10, 20],  # m/s
@@ -769,6 +770,12 @@ class Controls:
         current_angle_rate = abs(CS.steeringAngleDeg - self.last_steering_angle) / DT_CTRL
         angle_rate_ok = current_angle_rate < 94.9461
 
+        # 调试信息
+        cloudlog.info(f"Torque checks: eps={eps_torque:.2f}/{150*max_driver_torque:.2f} "
+                     f"driver={driver_torque:.2f}/{200*max_driver_torque:.2f} "
+                     f"total={abs(CS.steeringTorque):.2f}/{500*max_driver_torque:.2f} "
+                     f"angle_rate={current_angle_rate:.2f}/94.9461")
+                     
         if eps_ok and driver_ok and total_torque_ok and angle_rate_ok:
           CC.latActive = True
         else:
