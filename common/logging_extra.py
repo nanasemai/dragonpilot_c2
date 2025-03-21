@@ -88,6 +88,40 @@ class SwagLogger(logging.Logger):
             tstp = {"timestamp": {"event": event_name, "time": t*1e9}}
             self.debug(tstp)
 
+    def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=False, 
+             stacklevel=1, log_dir=None, module_name=None):
+        """重写_log方法以支持额外参数"""
+        if module_name:
+            self.bind(module=module_name)
+        
+        # 如果msg是字符串且有额外参数，转换为字典格式
+        if isinstance(msg, str) and (log_dir or module_name):
+            msg_dict = {
+                "msg": msg,
+                "log_dir": log_dir,
+                "module": module_name
+            }
+            msg = msg_dict
+            args = ()
+
+        return super()._log(level, msg, args, exc_info, extra, stack_info, stacklevel)
+
+    def info(self, msg, *args, **kwargs):
+        """重写info方法以支持额外参数"""
+        return self._log(logging.INFO, msg, args, **kwargs)
+
+    def error(self, msg, *args, **kwargs):
+        """重写error方法以支持额外参数"""
+        return self._log(logging.ERROR, msg, args, **kwargs)
+
+    def warning(self, msg, *args, **kwargs):
+        """重写warning方法以支持额外参数"""
+        return self._log(logging.WARNING, msg, args, **kwargs)
+
+    def debug(self, msg, *args, **kwargs):
+        """重写debug方法以支持额外参数"""
+        return self._log(logging.DEBUG, msg, args, **kwargs)
+
 class SwagFormatter(logging.Formatter):
     def __init__(self, swaglogger=None):
         super().__init__()
@@ -120,10 +154,10 @@ class SwagFormatter(logging.Formatter):
             if record.exc_info:
                 log_parts.append(self.formatException(record.exc_info))
             
-            # 添加上下文信息
-            ctx = self.swaglogger.get_ctx() if self.swaglogger else {}
-            if ctx and ctx != {'module': module}:
-                log_parts.append(f"ctx: {ctx}")
+            # # 添加上下文信息
+            # ctx = self.swaglogger.get_ctx() if self.swaglogger else {}
+            # if ctx and ctx != {'module': module}:
+            #     log_parts.append(f"ctx: {ctx}")
                 
             return " | ".join(filter(None, log_parts))
             
