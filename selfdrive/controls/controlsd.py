@@ -753,40 +753,8 @@ class Controls:
         not CS.steerFaultTemporary and   # 无临时转向故障
         not CS.steerFaultPermanent and   # 无永久转向故障
         CS.gearShifter != car.CarState.GearShifter.reverse):  # 非倒车状态
-
-      if self._dp_alka_torque_check:
         
-        # 原有的力矩检查逻辑
-        max_driver_torque = interp(CS.vEgo,
-                                [0, 5, 10, 20],  # m/s
-                                [1.0, 0.8, 0.65, 0.5])  # 力矩系数
-        eps_torque = abs(CS.steeringTorqueEps)
-        driver_torque = abs(CS.steeringTorque - CS.steeringTorqueEps)
-
-        eps_ok = eps_torque < (150 * max_driver_torque)
-        driver_ok = driver_torque < (200 * max_driver_torque)
-        total_torque_ok = abs(CS.steeringTorque) < (500 * max_driver_torque)
-
-        current_angle_rate = abs(CS.steeringAngleDeg - self.last_steering_angle) / DT_CTRL
-        angle_rate_ok = current_angle_rate < 94.9461
-
-        # 调试信息
-        cloudlog.info(f"力矩检查: EPS力矩={eps_torque:.2f}/{150*max_driver_torque:.2f} "
-                     f"驾驶员力矩={driver_torque:.2f}/{200*max_driver_torque:.2f} "
-                     f"总力矩={abs(CS.steeringTorque):.2f}/{500*max_driver_torque:.2f} "
-                     f"方向盘转速={current_angle_rate:.2f}/94.9461")
-                     
-        if eps_ok and driver_ok and total_torque_ok and angle_rate_ok:
-          CC.latActive = True
-        else:
-          CC.latActive = True
-          #self.events.add(EventName.steerTorqueOver)
-      else:
-        # 不检查力矩时直接激活
         CC.latActive = True
-      self.last_steering_angle = CS.steeringAngleDeg
-
-
 
     # rick - assist-less lane change
     if self._dp_lat_lane_change_assist_disabled:
