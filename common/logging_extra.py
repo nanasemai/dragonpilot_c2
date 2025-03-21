@@ -2,11 +2,14 @@ import datetime
 import os
 import sys
 import time
+import json
 import logging
 import traceback
 import threading
+import uuid
 from pathlib import Path
 from threading import local
+from collections import OrderedDict
 from logging.handlers import BaseRotatingHandler
 
 def get_boot_time():
@@ -18,6 +21,12 @@ def get_boot_time():
         return f"{boot_time:x}"
     except Exception:
         return f"{int(time.time()):x}"
+
+def _tmpfunc():
+    return 0
+
+def _srcfile():
+    return os.path.normcase(_tmpfunc.__code__.co_filename)
 
 class SwagLogger(logging.Logger):
     def __init__(self):
@@ -71,6 +80,13 @@ class SwagLogger(logging.Logger):
             finally:
                 self.log_local.ctx = old_ctx
         return _ctx()
+
+    def timestamp(self, event_name):
+        """记录时间戳事件"""
+        if "LOG_TIMESTAMPS" in os.environ:
+            t = time.monotonic()
+            tstp = {"timestamp": {"event": event_name, "time": t*1e9}}
+            self.debug(tstp)
 
 class SwagFormatter(logging.Formatter):
     def __init__(self, swaglogger=None):
@@ -190,6 +206,81 @@ def get_custom_file_handler(log_dir, module_name):
     except Exception as e:
         print(f"创建自定义文件处理器失败: {str(e)}")
         return None, None
+
+class SwagLogFileFormatter(SwagFormatter):
+    def fix_kv(self, k, v):
+        """修复键值对的类型标记"""
+        if isinstance(v, (str, bytes)):
+            k += "$s"
+        elif isinstance(v, float):
+            k += "$f"
+        elif isinstance(v, bool):
+            k += "$b"
+        elif isinstance(v, int):
+            k += "$i"
+        elif isinstance(v, dict):
+            nv = {}
+            for ik, iv in v.items():
+                ik, iv = self.fix_kv(ik, iv)
+                nv[ik] = iv
+            v = nv
+        elif isinstance(v, list):
+            k += "$a"
+        return k, v
+
+    def format(self, record):
+        if isinstance(record, str):
+            v = json.loads(record)
+        else:
+            v = self.format_dict(record)
+
+        mk, mv = self.fix_kv('msg', v['msg'])
+        del v['msg']
+        v[mk] = mv
+        v['id'] = uuid.uuid4().hex
+
+        return json_robust_dumps(v)
+
+    def findCaller(self, stack_info=False, stacklevel=1):
+        """定位调用者的位置信息"""
+        f = sys._getframe(3)
+        if f is not None:
+            f = f.f_back
+        orig_f = f
+        while f and stacklevel > 1:
+            f = f.f_back
+            stacklevel -= 1
+        if not f:
+            f = orig_f
+        rv = "(unknown file)", 0, "(unknown function)", None
+        while hasattr(f, "f_code"):
+            co = f.f_code
+            filename = os.path.normcase(co.co_filename)
+            if filename == _srcfile:
+                f = f.f_back
+                continue
+            sinfo = None
+            if stack_info:
+                sio = io.StringIO()
+                sio.write('Stack (most recent call last):\n')
+                traceback.print_stack(f, file=sio)
+                sinfo = sio.getvalue()
+                if sinfo[-1] == '\n':
+                    sinfo = sinfo[:-1]
+                sio.close()
+            rv = (co.co_filename, f.f_lineno, co.co_name, sinfo)
+            break
+        return rv
+
+def json_handler(obj):
+    return repr(obj)
+
+def json_robust_dumps(obj):
+    return json.dumps(obj, default=json_handler)
+
+class NiceOrderedDict(OrderedDict):
+    def __str__(self):
+        return json_robust_dumps(self)
 
 # 用于测试的代码
 if __name__ == "__main__":
