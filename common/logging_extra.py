@@ -21,7 +21,7 @@ def get_boot_time():
 
 class SwagLogger(logging.Logger):
     def __init__(self):
-        super().__init__("swaglog")
+        logging.Logger.__init__(self, "swaglog")
         self.global_ctx = {}
         self.log_local = local()
         self.log_local.ctx = {}
@@ -41,6 +41,37 @@ class SwagLogger(logging.Logger):
     def bind_global(self, **kwargs):
         self.global_ctx.update(kwargs)
 
+    def event(self, name, **kwargs):
+        """记录事件日志"""
+        try:
+            # 构建事件数据
+            event_data = {"event": name}
+            event_data.update(kwargs)
+            
+            # 根据是否包含错误信息决定日志级别
+            if 'error' in kwargs:
+                self.error(event_data)
+            else:
+                self.info(event_data)
+        except Exception as e:
+            self.error(f"Failed to log event {name}: {str(e)}")
+
+    # 添加上下文管理器方法
+    def ctx(self):
+        """创建一个临时的日志上下文"""
+        from contextlib import contextmanager
+        import copy
+        
+        @contextmanager
+        def _ctx():
+            old_ctx = getattr(self.log_local, 'ctx', {})
+            self.log_local.ctx = copy.copy(old_ctx) or {}
+            try:
+                yield
+            finally:
+                self.log_local.ctx = old_ctx
+        return _ctx()
+
 class SwagFormatter(logging.Formatter):
     def __init__(self, swaglogger=None):
         super().__init__()
@@ -50,15 +81,16 @@ class SwagFormatter(logging.Formatter):
         try:
             timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:23]
             level = record.levelname
+            module = self.swaglogger.get_ctx().get('module', 'unknown') if self.swaglogger else 'unknown'
             
-            # 获取模块名
-            if hasattr(record, 'name'):
-                module = record.name
+            # 处理不同类型的消息
+            if isinstance(record.msg, dict):
+                msg = str(record.msg)
             else:
-                module = self.swaglogger.get_ctx().get('module', 'unknown') if self.swaglogger else 'unknown'
-            
-            # 格式化消息
-            msg = str(record.msg)
+                try:
+                    msg = record.getMessage()
+                except (ValueError, TypeError):
+                    msg = str([record.msg] + record.args)
             
             # 构建完整日志行
             log_parts = [
@@ -68,8 +100,14 @@ class SwagFormatter(logging.Formatter):
                 msg
             ]
             
+            # 添加异常信息
             if record.exc_info:
                 log_parts.append(self.formatException(record.exc_info))
+            
+            # 添加上下文信息
+            ctx = self.swaglogger.get_ctx() if self.swaglogger else {}
+            if ctx and ctx != {'module': module}:
+                log_parts.append(f"ctx: {ctx}")
                 
             return " | ".join(filter(None, log_parts))
             
