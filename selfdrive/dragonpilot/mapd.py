@@ -25,7 +25,7 @@
 import cereal.messaging as messaging
 from openpilot.common.realtime import Ratekeeper, set_core_affinity, set_realtime_priority
 from openpilot.common.params import Params
-from openpilot.common.swaglog import cloudlog, add_file_handler
+from openpilot.common.swaglog import cloudlog
 import json
 from cereal import log
 from pathlib import Path

@@ -3,7 +3,7 @@ import datetime
 import os
 from pathlib import Path
 from openpilot.common.realtime import set_core_affinity, set_realtime_priority
-from openpilot.common.swaglog import cloudlog, add_file_handler
+from openpilot.common.swaglog import cloudlog
 
 # 配置参数
 GPX_LOG_PATH = '/data/media/0/gpx_logs/'

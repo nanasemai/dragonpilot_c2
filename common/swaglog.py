@@ -1,91 +1,19 @@
-'''
-日志系统使用说明:
-1. 基础用法:
-   cloudlog.debug("调试信息")
-   cloudlog.info("普通信息")
-   cloudlog.warning("警告信息")
-   cloudlog.error("错误信息")
-2. 带参数的格式化:
-   cloudlog.info("用户 %s 登录", username)
-   cloudlog.warning("温度: %.2f", temp)
-3. 指定日志目录:
-   cloudlog.info("消息内容", log_dir="/data/media/0/custom_logs")
-4. 指定模块名:
-   cloudlog.info("消息内容", module_name="CustomModule")
-5. 同时指定目录和模块:
-   cloudlog.info("消息内容", log_dir="/data/media/0/custom_logs", module_name="CustomModule")
-6. 带上下文信息:
-   with cloudlog.ctx(user="用户名"):
-       cloudlog.info("带上下文的消息")
-7. 事件记录:
-   cloudlog.event("事件名称", value=123, error=True)
-8. 时间戳记录:
-   cloudlog.timestamp("事件名称")
-
-9. 初始化模块日志(推荐方式):
-   # 设置模块名称
-   cloudlog.bind_global(module='模块名')
-   # 确保日志目录存在
-   Path(日志目录).mkdir(parents=True, exist_ok=True)
-   # 添加文件处理器
-   add_file_handler(cloudlog, 日志目录)
-   # 添加文件处理器 (指定文件名前缀)
-   add_file_handler(cloudlog, 日志目录, 文件名前缀)
-
-注意事项:
-- 不指定 log_dir 时只输出到控制台和默认日志
-- 指定 log_dir 后会同时输出到控制台和指定目录
-- 不同的 log_dir 会创建独立的日志文件
-- module_name 会影响日志文件名和日志内容的模块标识
-'''
-#rick:
-#this file is identical to system/swaglog.py, put a copy here to reduce code changes when updating from op master branch.
 import logging
 import os
+import traceback
 import warnings
-import time
 import datetime
-from pathlib import Path
+import threading
 import zmq
 from openpilot.common.logging_extra import (
-    SwagLogger, SwagFormatter, SwagLogFileFormatter,
-    SwaglogRotatingFileHandler, SwagErrorFilter,
-    get_custom_file_handler, get_boot_time
+    SwagLogger, SwagFormatter
 )
-from openpilot.system.hardware import PC
 from openpilot.common.params import Params
 
-# 日志目录配置
-if PC:
-    SWAGLOG_DIR = os.path.join(str(Path.home()), ".comma", "log")
-else:
-    MEDIA_PATH = "/data/media/0/c2_logs/swaglog"
-    DEFAULT_PATH = "/data/log/"
-    SWAGLOG_DIR = MEDIA_PATH if os.path.exists("/data/media/0") else DEFAULT_PATH
-
-
-
-
-def get_file_handler():
-    """获取基础文件处理器"""
-    try:
-        Path(SWAGLOG_DIR).mkdir(parents=True, exist_ok=True)
-        base_filename = os.path.join(SWAGLOG_DIR, "swaglog")
-        handler = SwaglogRotatingFileHandler(
-            base_filename,
-            max_bytes=512*1024,    # 512KB
-            interval=300,          # 5分钟
-            backup_count=500       # 备份数量
-        )
-        return handler
-    except Exception as e:
-        print(f"Error creating file handler: {str(e)}")
-        return None
-
 class UnixDomainSocketHandler(logging.Handler):
-    """Unix域套接字日志处理器"""
+    """Unix域套接字处理器，用于日志转发"""
     def __init__(self, formatter):
-        logging.Handler.__init__(self)
+        super().__init__()
         self.setFormatter(formatter)
         self.pid = None
         self.zctx = None
@@ -109,124 +37,128 @@ class UnixDomainSocketHandler(logging.Handler):
             warnings.filterwarnings("ignore", category=ResourceWarning, message="unclosed.*<zmq.*>")
             self.connect()
 
-        msg = self.format(record).rstrip('\n')
         try:
-            s = chr(record.levelno) + msg
-            self.sock.send(s.encode('utf8'), zmq.NOBLOCK)
+            msg = self.format(record).rstrip('\n')
+            self.sock.send((chr(record.levelno) + msg).encode('utf8'), zmq.NOBLOCK)
         except zmq.error.Again:
             pass
 
-def add_file_handler(log, log_dir=None, module_name=None):
-    """添加文件处理器"""
-    if module_name is None:
-        import inspect
-        frame = inspect.currentframe().f_back
-        module = inspect.getmodule(frame)
-        if module:
-            module_name = module.__name__.split('.')[-1]
-    try:
-        # 移除所有现有的文件处理器
-        for handler in log.handlers[:]:
-            if isinstance(handler, (SwaglogRotatingFileHandler, logging.FileHandler)):
-                log.removeHandler(handler)
+class SwagLogManager:
+    """日志管理器，处理日志配置和格式化"""
+    def __init__(self):
+        self.logger = SwagLogger()
+        self.logger.setLevel(logging.DEBUG)
+        self._setup_handlers()
+        self._wrap_log_methods()
 
-        # 使用 get_custom_file_handler 创建处理器
-        if log_dir:
-            handlers = get_custom_file_handler(log_dir, module_name)
-            if handlers:
-                handler, error_handler = handlers
-                if handler:
-                    handler.setFormatter(SwagLogFileFormatter(log))
-                    handler.addFilter(SwagErrorFilter())
-                    log.addHandler(handler)
-                if error_handler:
-                    error_handler.setFormatter(SwagLogFileFormatter(log))
-                    error_handler.setLevel(logging.ERROR)
-                    log.addHandler(error_handler)
+    def _setup_handlers(self):
+        """设置日志处理器"""
+        # 只保留控制台输出和消息转发
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(self._get_console_log_level())
+        console_handler.setFormatter(SwagFormatter(self.logger))
+        self.logger.addHandler(console_handler)
+
+        # 转发到 logmessaged
+        socket_handler = UnixDomainSocketHandler(SwagFormatter(self.logger))
+        socket_handler.setLevel(logging.DEBUG)
+        self.logger.addHandler(socket_handler)
+
+
+
+    def _get_console_log_level(self):
+        """获取控制台日志级别"""
+        params = Params()
+        dp_log_level = params.get("dp_log_level", encoding='utf8')
+        
+        if dp_log_level is not None:
+            level_map = {"0": "warning", "1": "info", "2": "debug"}
+            print_level = level_map.get(dp_log_level, "warning")
         else:
-            # 使用默认处理器
-            handler = get_file_handler()
-            if handler:
-                handler.setFormatter(SwagLogFileFormatter(log))
-                if module_name and hasattr(handler, 'module_name'):
-                    handler.module_name = module_name
-                log.addHandler(handler)
-            
-    except Exception as e:
-        print(f"Error creating file handler: {str(e)}")
+            print_level = os.environ.get('LOGPRINT', 'warning')
 
-def wrap_log_method(original_method, level_name):
-    """包装日志方法"""
-    def wrapped_method(msg, *args, **kwargs):
-        log_dir = kwargs.pop('log_dir', None)
-        module_name = kwargs.pop('module_name', None)
+        return {
+            'debug': logging.DEBUG,
+            'info': logging.INFO,
+            'warning': logging.WARNING
+        }.get(print_level, logging.WARNING)
 
-        if not msg and not args:
-            return None
 
-        old_ctx = None
-        if module_name:
-            old_ctx = cloudlog.get_ctx().copy()
-            cloudlog.bind(module=module_name)
-
+    def _get_caller_info(self):
+        """获取调用者信息"""
         try:
-            # 移除 log_dir 相关的处理逻辑，统一使用 add_file_handler
-            if log_dir or module_name:
-                add_file_handler(cloudlog, log_dir, module_name)
+            for frame in traceback.extract_stack()[:-2]:
+                if not frame[0].endswith('swaglog.py'):
+                    return {
+                        'file': frame[0],
+                        'line': frame[1],
+                        'func': frame[2]
+                    }
+        except Exception:
+            pass
+        return None
 
-            return original_method(msg, *args, **kwargs)
+    def _wrap_log_method(self, original_method, level_name):
+        """包装日志方法"""
+        def wrapped_method(msg, *args, **kwargs):
+            if not msg and not args:
+                return None
 
-        finally:
-            if module_name and old_ctx:
-                cloudlog.log_local.ctx = old_ctx
+            # 处理模块名和上下文
+            module_name = kwargs.pop('module_name', None)
+            log_dir = kwargs.pop('log_dir', None)
+            old_ctx = None
 
-    return wrapped_method
+            if module_name:
+                old_ctx = self.logger.get_ctx().copy()
+                self.logger.bind(module=module_name)
 
-# 初始化日志记录器
-cloudlog = log = SwagLogger()
-log.setLevel(logging.DEBUG)
+            try:
+                # 格式化消息
+                formatted_msg = str(msg) if isinstance(msg, dict) else (
+                    msg % args if args else str(msg)
+                )
 
-# 保存原始日志方法
-original_debug = cloudlog.debug
-original_info = cloudlog.info
-original_warning = cloudlog.warning
-original_error = cloudlog.error
+                # 获取当前模块
+                current_module = module_name or self.logger.get_ctx().get('module', 'unknown')
 
-# 替换为包装后的日志方法
-cloudlog.debug = wrap_log_method(original_debug, "DEBUG")
-cloudlog.info = wrap_log_method(original_info, "INFO")
-cloudlog.warning = wrap_log_method(original_warning, "WARNING")
-cloudlog.error = wrap_log_method(original_error, "ERROR")
+                # 创建日志记录
+                record = logging.LogRecord(
+                    name=current_module,
+                    level=logging.getLevelName(level_name),
+                    pathname='',
+                    lineno=0,
+                    msg=formatted_msg,
+                    args=(),
+                    exc_info=None
+                )
 
-# 配置输出处理器
-outhandler = logging.StreamHandler()
+                # 添加自定义目录信息
+                if log_dir:
+                    record.custom_log_dir = log_dir  # 直接设置属性而不是使用 setattr
 
-# 获取日志级别配置
-params = Params()
-dp_log_level = params.get("dp_log_level", encoding='utf8')
+                # 发送到处理器
+                self.logger.handle(record)
 
-# 设置日志级别
-if dp_log_level is not None:
-    try:
-        level_map = {
-            "0": "warning",
-            "1": "info",
-            "2": "debug"
+            finally:
+                if module_name and old_ctx:
+                    self.logger.log_local.ctx.clear()
+                    self.logger.log_local.ctx.update(old_ctx)
+
+        return wrapped_method
+
+    def _wrap_log_methods(self):
+        """包装所有日志方法"""
+        original_methods = {
+            'debug': self.logger.debug,
+            'info': self.logger.info,
+            'warning': self.logger.warning,
+            'error': self.logger.error
         }
-        print_level = level_map.get(dp_log_level, "warning")
-    except Exception:
-        print_level = "warning"
-else:
-    print_level = os.environ.get('LOGPRINT', 'warning')
 
-# 应用日志级别
-if print_level == 'debug':
-    outhandler.setLevel(logging.DEBUG)
-elif print_level == 'info':
-    outhandler.setLevel(logging.INFO)
-elif print_level == 'warning':
-    outhandler.setLevel(logging.WARNING)
+        for level, method in original_methods.items():
+            setattr(self.logger, level, self._wrap_log_method(method, level.upper()))
 
-# 添加处理器
-log.addHandler(outhandler)
-log.addHandler(UnixDomainSocketHandler(SwagFormatter(log)))
+# 创建全局日志实例
+log_manager = SwagLogManager()
+cloudlog = log = log_manager.logger

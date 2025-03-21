@@ -20,7 +20,7 @@ from openpilot.selfdrive.manager.helpers import unblock_stdout, write_onroad_par
 from openpilot.selfdrive.manager.process import ensure_running
 from openpilot.selfdrive.manager.process_config import managed_processes,ensure_dependencies
 from openpilot.selfdrive.athena.registration import register, UNREGISTERED_DONGLE_ID
-from openpilot.common.swaglog import cloudlog, add_file_handler
+from openpilot.common.swaglog import cloudlog
 from openpilot.system.version import is_dirty, get_commit, get_version, get_origin, get_short_branch, \
   get_normalized_origin, terms_version, training_version, \
   is_tested_branch, is_release_branch, get_commit_date
@@ -409,7 +409,6 @@ if __name__ == "__main__":
   except KeyboardInterrupt:
     print("got CTRL-C, exiting")
   except Exception:
-    add_file_handler(cloudlog)
     cloudlog.exception("Manager failed to start")
 
     try:
