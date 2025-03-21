@@ -153,12 +153,7 @@ class SwagFormatter(logging.Formatter):
             # 添加异常信息
             if record.exc_info:
                 log_parts.append(self.formatException(record.exc_info))
-            
-            # # 添加上下文信息
-            # ctx = self.swaglogger.get_ctx() if self.swaglogger else {}
-            # if ctx and ctx != {'module': module}:
-            #     log_parts.append(f"ctx: {ctx}")
-                
+      
             return " | ".join(filter(None, log_parts))
             
         except Exception as e:
