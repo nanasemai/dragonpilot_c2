@@ -1,5 +1,6 @@
 from collections import deque
 import math
+from pathlib import Path
 import numpy as np
 from cereal import log
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -11,7 +12,7 @@ from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.controls.lib.pid import PIDController
 from openpilot.selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.selfdrive.hybrid_modeld.constants import ModelConstants
-from openpilot.common.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog,add_file_handler
 
 # At higher speeds (25+mph) we can assume:
 # Lateral acceleration achieved by a specific car correlates to
@@ -30,6 +31,10 @@ LOW_SPEED_Y_NN = [12, 3, 1, 0]
 LAT_PLAN_MIN_IDX = 5
 # 添加 NNFF 日志路径配置
 #NNFF_LOG_DIR = "/data/media/0/c2_logs/nnff_log"
+#Path(NNFF_LOG_DIR).mkdir(parents=True, exist_ok=True)
+#cloudlog.bind_global(module='NNFF')
+#add_file_handler(cloudlog, NNFF_LOG_DIR, "NNFF")
+
 
 def get_predicted_lateral_jerk(lat_accels, t_diffs):
   # compute finite difference between subsequent model_data.acceleration.y values
@@ -103,7 +108,7 @@ class LatControlTorque(LatControl):
     self.use_nnff_lite = CI.use_nnff_lite
     if self.use_nnff or self.use_nnff_lite:
       #cloudlog.info(f"NNFF 初始化 - 模式: {'完整版' if self.use_nnff else '轻量版'},"
-      #              f" 车型: {CP.carFingerprint}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+      #              f" 车型: {CP.carFingerprint}"")
       # Instantaneous lateral jerk changes very rapidly, making it not useful on its own,
       # however, we can "look ahead" to the future planned lateral jerk in order to guage
       # whether the current desired lateral jerk will persist into the future, i.e.
@@ -229,16 +234,13 @@ class LatControlTorque(LatControl):
       if model_good and (self.use_nnff or self.use_nnff_lite):
         # # 每 100 帧记录一次基础状态
         # if self._frame % 100 == 0:
-        #  cloudlog.debug(f"NNFF 状态 - 速度: {CS.vEgo:.1f}m/s, 横向加速度: {actual_lateral_accel:.2f}m/s², 期望加速度: {desired_lateral_accel:.2f}m/s²",
-        #               log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        #  cloudlog.debug(f"NNFF 状态 - 速度: {CS.vEgo:.1f}m/s, 横向加速度: {actual_lateral_accel:.2f}m/s², 期望加速度: {desired_lateral_accel:.2f}m/s²")
         # # 当横向加速度变化较大时记录
         # if abs(desired_lateral_accel - actual_lateral_accel) > 1.0:
-        #  cloudlog.info(f"NNFF 大幅变化 - 横向加速度差值: {desired_lateral_accel - actual_lateral_accel:.2f}m/s²",
-        #                  log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        #  cloudlog.info(f"NNFF 大幅变化 - 横向加速度差值: {desired_lateral_accel - actual_lateral_accel:.2f}m/s²")
         # # 记录抖动控制相关信息（当抖动值较大时）
         #  if abs(lookahead_lateral_jerk) > 2.0:
-        #    cloudlog.debug(f"NNFF 抖动控制 - 前瞻抖动: {lookahead_lateral_jerk:.2f}, 实际抖动: {actual_lateral_jerk:.2f}",
-        #                   log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        #    cloudlog.debug(f"NNFF 抖动控制 - 前瞻抖动: {lookahead_lateral_jerk:.2f}, 实际抖动: {actual_lateral_jerk:.2f}")
         # prepare "look-ahead" desired lateral jerk
         lookahead = interp(CS.vEgo, self.friction_look_ahead_bp, self.friction_look_ahead_v)
         friction_upper_idx = next((i for i, val in enumerate(ModelConstants.T_IDXS) if val > lookahead), 16)
@@ -305,8 +307,7 @@ class LatControlTorque(LatControl):
         #nn_log = nn_input + nnff_setpoint_input + nnff_measurement_input
         # # 记录神经网络输出（当输出较大时）
         # if abs(torque_from_setpoint) > 1.0:
-        #   cloudlog.debug(f"NNFF 网络输出 - 设定值: {torque_from_setpoint:.2f}, 测量值: {torque_from_measurement:.2f}, 误差: {pid_log.error:.2f}",
-        #     log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        #   cloudlog.debug(f"NNFF 网络输出 - 设定值: {torque_from_setpoint:.2f}, 测量值: {torque_from_measurement:.2f}, 误差: {pid_log.error:.2f}")
       else:# 不使用NNFF或者模型不对
         gravity_adjusted_lateral_accel = desired_lateral_accel - roll_compensation
         torque_from_setpoint = self.torque_from_lateral_accel(LatControlInputs(setpoint, roll_compensation, CS.vEgo, CS.aEgo), self.torque_params,
@@ -344,7 +345,6 @@ class LatControlTorque(LatControl):
 
     # # 记录最终控制输出（当力矩较大时）
     # if abs(output_torque) > 2.0:
-    #   cloudlog.debug(f"NNFF 控制输出 - 力矩: {output_torque:.2f}, P: {self.pid.p:.2f}, I: {self.pid.i:.2f}, D: {self.pid.d:.2f}, F: {self.pid.f:.2f}",
-    #     log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+    #   cloudlog.debug(f"NNFF 控制输出 - 力矩: {output_torque:.2f}, P: {self.pid.p:.2f}, I: {self.pid.i:.2f}, D: {self.pid.d:.2f}, F: {self.pid.f:.2f}")
     # TODO left is positive in this convention
     return -output_torque, 0.0, pid_log

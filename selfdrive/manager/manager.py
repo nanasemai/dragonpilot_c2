@@ -111,6 +111,7 @@ def manager_init() -> None:
     ("dp_device_display_off_mode", "0"),
     # 添加换道中止检查参数
     ("dp_lat_lane_change_abort_check", "0"),
+    ("dp_alka_torque_check", "0"),  # ALKA力矩检查开关: 0-关闭 1-开启
   ]
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))

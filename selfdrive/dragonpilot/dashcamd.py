@@ -56,7 +56,7 @@ class Dashcamd:
 
   def update_config(self, config):
     self.config.update(config)
-    #cloudlog.debug(f"配置更新: config={self.config}, quality={self.config['quality']}", log_dir=DASHCAM_LOGS_PATH)
+    #cloudlog.debug(f"配置更新: config={self.config}, quality={self.config['quality']}")
 
     quality = self.config['quality']
     if quality not in QUALITY_PRESETS:
@@ -83,7 +83,7 @@ class Dashcamd:
       return
 
     self.recording = True
-    #cloudlog.info("开始循环录制", log_dir=DASHCAM_LOGS_PATH)
+    #cloudlog.info("开始循环录制")
 
     # 启动录制循环
     self._record_next_file()
@@ -95,7 +95,7 @@ class Dashcamd:
 
     self.recording = False
     self._stop_current_recording()
-    #cloudlog.info("停止录制", log_dir=DASHCAM_LOGS_PATH)
+    #cloudlog.info("停止录制")
 
   def _stop_current_recording(self):
     """停止当前录制进程"""
@@ -140,7 +140,7 @@ class Dashcamd:
       quality_info = f"质量: {self.config['quality']}, 比特率: {self.DASHCAM_BIT_RATES}"
       if self.quality_settings["resolution"]:
         quality_info += f", 分辨率: {self.quality_settings['resolution']}"
-      #cloudlog.info(f"开始录制文件: {full_path}, {quality_info}, 时长: {self.DASHCAM_DURATION}秒", log_dir=DASHCAM_LOGS_PATH)
+      #cloudlog.info(f"开始录制文件: {full_path}, {quality_info}, 时长: {self.DASHCAM_DURATION}秒")
 
       # 启动监控线程，等待当前录制完成后继续下一个
       import threading
@@ -190,7 +190,7 @@ class Dashcamd:
         if files:
           files.sort(key=lambda x: (x[1], x[2]))
           os.remove(files[0][0])
-          #cloudlog.info(f"已删除旧文件: {files[0][0]}", log_dir=DASHCAM_LOGS_PATH)
+          #cloudlog.info(f"已删除旧文件: {files[0][0]}")
     except Exception as e:
       cloudlog.error(f"清理空间出错: {str(e)}")
 

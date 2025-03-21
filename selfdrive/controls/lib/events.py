@@ -665,21 +665,20 @@ EVENTS: Dict[int, Dict[str, Union[Alert, AlertCallbackType]]] = {
     ET.NO_ENTRY: NoEntryAlert(_("Steering Temporarily Unavailable")),
   },
 
-  # 新增事件用于低速大角度转向场景
-  EventName.steerTempUnavailableCarMode: {
-    ET.WARNING: Alert(
-      _("横向控制暂时关闭,低速大角度转向中"),
-      _(""),
-      AlertStatus.normal, AlertSize.small,
-      Priority.LOWEST, VisualAlert.none, AudibleAlert.none, 3.),
-  },
-
   EventName.roadEdgeDetected: {
     ET.WARNING: Alert(
       _("道路检测到边缘"),
       _(""),
       AlertStatus.normal, AlertSize.small,
-      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.prompt, 1.),# 单次提醒持续时间设为1秒
+      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.prompt, 1.5),# 单次提醒持续时间设为1.5秒
+  },
+
+  EventName.steerTorqueOver: {
+    ET.WARNING: Alert(
+      _("力矩过大,请手动接管方向盘"),
+      _(""),
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOW, VisualAlert.steerRequired, AudibleAlert.prompt, 0.5),# 单次提醒持续时间设为1.5秒
   },
 
   EventName.steerTimeLimit: {

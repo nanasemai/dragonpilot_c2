@@ -7,7 +7,6 @@ from openpilot.common.swaglog import cloudlog, add_file_handler
 
 # 配置参数
 GPX_LOG_PATH = '/data/media/0/gpx_logs/'
-#GPX_ERRORLOGS_PATH = '/data/media/0/c2_logs/gpx_info_logs/'
 LOG_HERTZ = 5                    # 采样频率 (Hz)
 LOG_LENGTH = 5                   # 记录时长 (分钟)
 LOST_SIGNAL_COUNT_LENGTH = 10    # 信号丢失判定时长 (秒)
@@ -27,7 +26,6 @@ class GpxD:
 
     # 确保日志目录存在
     Path(GPX_LOG_PATH).mkdir(parents=True, exist_ok=True)
-    #Path(GPX_ERRORLOGS_PATH).mkdir(parents=True, exist_ok=True)
 
     # 修改日志初始化方式，使用自定义日志目录
     cloudlog.bind_global(module='gpxd')
@@ -40,7 +38,7 @@ class GpxD:
       # 更新暂停状态时使用结构化日志
       if gps.speed >= MIN_SPEED_THRESHOLD:
         if self.pause:
-          #cloudlog.info("记录开始", state="moving", speed=gps.speed, log_dir=GPX_ERRORLOGS_PATH)
+          #cloudlog.info("记录开始", state="moving", speed=gps.speed)
           self.pause = False
       # 检查GPS信号有效性
       if not gps.flags % 2 or self.pause:
@@ -61,7 +59,7 @@ class GpxD:
 
       # 检查是否需要暂停
       if not self.pause and gps.speed < MIN_SPEED_THRESHOLD:
-        #cloudlog.info("记录暂停 - 车辆停止", log_dir=GPX_ERRORLOGS_PATH)
+        #cloudlog.info("记录暂停 - 车辆停止")
         self.pause = True
 
     except Exception as e:
@@ -78,7 +76,7 @@ class GpxD:
     if should_write:
       try:
         self._write_gpx()
-        #cloudlog.info(f"已写入 {self.log_count} 个点到GPX文件", log_dir=GPX_ERRORLOGS_PATH)
+        #cloudlog.info(f"已写入 {self.log_count} 个点到GPX文件")
         self._reset_state()
       except Exception as e:
         cloudlog.exception(f"GPX文件写入错误: {str(e)}")
@@ -134,7 +132,7 @@ def gpxd_thread(sm=None):
 
   try:
     gpxd = GpxD()
-    #cloudlog.info("GPX记录器启动", log_dir=GPX_ERRORLOGS_PATH)
+    #cloudlog.info("GPX记录器启动")
 
     while True:
       sm.update(1000)

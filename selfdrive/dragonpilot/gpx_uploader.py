@@ -42,7 +42,6 @@ LOG_HERTZ = 1/10 # 0.1 Hz = 10 sec, higher for higher accuracy, 10hz seems fine
 # uploader
 UPLOAD_ATTR_NAME = 'user.upload'
 UPLOAD_ATTR_VALUE = b'1'
-LOG_PATH = '/data/media/0/gpx_logs/'
 
 # osm api
 API_HEADER = {'Authorization': 'Bearer 2pvUyXfk9vizuh7PwQFSEYBtFWcM-Pu7vxApUjSA0fc'}

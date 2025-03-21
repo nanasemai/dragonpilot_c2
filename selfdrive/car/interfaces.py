@@ -21,7 +21,7 @@ from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, get_fri
 from openpilot.selfdrive.controls.lib.events import Events
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
 from openpilot.common.params import Params
-from openpilot.common.swaglog import cloudlog
+from openpilot.common.swaglog import cloudlog,add_file_handler
 
 ButtonType = car.CarState.ButtonEvent.Type
 GearShifter = car.CarState.GearShifter
@@ -43,6 +43,9 @@ ACTIVATION_FUNCTION_NAMES = {'σ': 'sigmoid'}
 
 # 添加 NNFF 日志路径配置
 NNFF_LOG_DIR = "/data/media/0/c2_logs/nnff_log"
+Path(NNFF_LOG_DIR).mkdir(parents=True, exist_ok=True)
+cloudlog.bind_global(module='NNFF')
+add_file_handler(cloudlog, NNFF_LOG_DIR, "NNFF")
 
 def similarity(s1: str, s2: str) -> float:
   return SequenceMatcher(None, s1, s2).ratio()
@@ -159,16 +162,15 @@ class FluxModel:
 
 
 def get_nn_model_path(car, eps_firmware) -> Optional[str]:
-  Path(NNFF_LOG_DIR).mkdir(parents=True, exist_ok=True)
   def check_nn_path(check_model):
     model_path = None
     max_similarity = -1.0
-    #cloudlog.info(f"NNFF: 开始搜索模型 - 车型: {check_model}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+    #cloudlog.info(f"NNFF: 开始搜索模型 - 车型: {check_model}")
     for f in os.listdir(TORQUE_NN_MODEL_PATH):
       if f.endswith(".json"):
         model = f.replace(".json", "").replace(f"{TORQUE_NN_MODEL_PATH}/", "")
         similarity_score = similarity(model, check_model)
-        #cloudlog.debug(f"NNFF 模型匹配度: {model} -> {similarity_score:.3f}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        #cloudlog.debug(f"NNFF 模型匹配度: {model} -> {similarity_score:.3f}")
         if similarity_score > max_similarity:
           max_similarity = similarity_score
           model_path = os.path.join(TORQUE_NN_MODEL_PATH, f)
@@ -177,21 +179,21 @@ def get_nn_model_path(car, eps_firmware) -> Optional[str]:
   if len(eps_firmware) > 3:
     eps_firmware = eps_firmware.replace("\\", "")
     check_model = f"{car} {eps_firmware}"
-    #cloudlog.info(f"NNFF: 尝试使用带固件版本的模型匹配 - {check_model}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+    #cloudlog.info(f"NNFF: 尝试使用带固件版本的模型匹配 - {check_model}")
   else:
     check_model = car
-    #cloudlog.info(f"NNFF: 使用车型名称匹配 - {check_model}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+    #cloudlog.info(f"NNFF: 使用车型名称匹配 - {check_model}")
 
   model_path, max_similarity = check_nn_path(check_model)
   if car not in model_path or 0.0 <= max_similarity < 0.9:
-    cloudlog.warning(f"NNFF: 首次匹配失败，尝试仅使用车型名称 - {car}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+    cloudlog.warning(f"NNFF: 首次匹配失败，尝试仅使用车型名称 - {car}")
     check_model = car
     model_path, max_similarity = check_nn_path(check_model)
     if car not in model_path or 0.0 <= max_similarity < 0.9:
-      cloudlog.error(f"NNFF: 模型匹配失败 - 车型: {car}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+      cloudlog.error(f"NNFF: 模型匹配失败 - 车型: {car}")
       model_path = None
   else:
-    cloudlog.info(f"NNFF: 模型匹配成功 - 路径: {model_path}, 匹配度: {max_similarity:.3f}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+    cloudlog.info(f"NNFF: 模型匹配成功 - 路径: {model_path}, 匹配度: {max_similarity:.3f}")
   return model_path
 
 
@@ -243,15 +245,15 @@ class CarInterfaceBase(ABC):
 
   def get_ff_nn(self, x):
     if not isinstance(x, (list, tuple, np.ndarray)):
-      cloudlog.error("NNFF: 输入数据类型错误", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+      cloudlog.error("NNFF: 输入数据类型错误")
       return 0.0
     if self.lat_torque_nn_model is not None:
       try:
         result = self.lat_torque_nn_model.evaluate(x)
-        #cloudlog.debug(f"NNFF 评估: 输入={x}, 输出={result:.6f}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        #cloudlog.debug(f"NNFF 评估: 输入={x}, 输出={result:.6f}")
         return result
       except Exception as e:
-        cloudlog.exception(f"NNFF 评估错误: {str(e)}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        cloudlog.exception(f"NNFF 评估错误: {str(e)}")
         return 0.0
     return 0.0
 
@@ -261,14 +263,14 @@ class CarInterfaceBase(ABC):
     return car in data
 
   def initialize_lat_torque_nn(self, car, eps_firmware) -> bool:
-    cloudlog.info(f"NNFF: 开始初始化神经网络模型 - 车型: {car}, EPS固件: {eps_firmware}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+    cloudlog.info(f"NNFF: 开始初始化神经网络模型 - 车型: {car}, EPS固件: {eps_firmware}")
     self.lat_torque_nn_model = get_nn_model(car, eps_firmware)
     if self.lat_torque_nn_model is not None:
-      cloudlog.info(f"NNFF: 模型初始化成功 - 车型: {car}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+      cloudlog.info(f"NNFF: 模型初始化成功 - 车型: {car}")
       if hasattr(self.lat_torque_nn_model, 'friction_override'):
-        cloudlog.info(f"NNFF: 摩擦力覆盖状态: {self.lat_torque_nn_model.friction_override}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        cloudlog.info(f"NNFF: 摩擦力覆盖状态: {self.lat_torque_nn_model.friction_override}")
     else:
-      cloudlog.warning(f"NNFF: 模型初始化失败 - 车型: {car}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+      cloudlog.warning(f"NNFF: 模型初始化失败 - 车型: {car}")
     return self.lat_torque_nn_model is not None
 
   @staticmethod
@@ -301,7 +303,7 @@ class CarInterfaceBase(ABC):
       eps_firmware = str(next((fw.fwVersion for fw in car_fw if fw.ecu == "eps"), ""))
       model = get_nn_model_path(candidate, eps_firmware)
       if model is not None:
-        cloudlog.info(f"NNFF 模型加载成功: {model}", log_dir=NNFF_LOG_DIR, module_name="NNFF-INFO")
+        cloudlog.info(f"NNFF 模型加载成功: {model}")
         Params().put("NNFFModelName", candidate.replace("_", " "))
 
     # Vehicle mass is published curb weight plus assumed payload such as a human driver; notCars have no assumed payload
@@ -506,77 +508,30 @@ class CarInterfaceBase(ABC):
         events.add(EventName.buttonCancel)
 
     # Handle permanent and temporary steering faults
+    # 处理转向故障警告
     self.steering_unpressed = 0 if cs_out.steeringPressed else self.steering_unpressed + 1
-
-    # 根据车速动态调整转向监控阈值
-    speed_factor = max(1.0, cs_out.vEgo * 0.5)  # 车速越低，阈值越宽松
-    torque_threshold = 1.0 * speed_factor
-    angle_threshold = 90.0 / speed_factor
-
-    # 添加转向力矩和角度监控日志
-    # if abs(cs_out.steeringTorque) > torque_threshold or abs(cs_out.steeringAngleDeg) > angle_threshold:
-    #   cloudlog.debug(f"转向状态监控: 车速={cs_out.vEgo:.1f}m/s, 转向角={cs_out.steeringAngleDeg:.1f}度, "
-    #                 f"转向力矩={cs_out.steeringTorque:.1f}, 档位={cs_out.gearShifter}")
-
+    # 临时转向故障
     if cs_out.steerFaultTemporary:
-      # 低速大角度转向时放宽故障判断条件
-      low_speed_threshold = 5.0  # m/s
-      if cs_out.vEgo < low_speed_threshold and abs(cs_out.steeringAngleDeg) > 60.0:
-        fault_threshold = 80.0  # 低速时允许更大的转向力矩
-      else:
-        fault_threshold = 60.0
-
-      if abs(cs_out.steeringTorque) > fault_threshold:
-        # cloudlog.warning(f"临时转向故障触发: 车速={cs_out.vEgo:.1f}m/s, 方向盘角度={cs_out.steeringAngleDeg:.1f}度, "
-        #                 f"方向盘力矩={cs_out.steeringTorque:.1f}, 档位={cs_out.gearShifter}, "
-        #                 f"用户操作方向盘={cs_out.steeringPressed}, 静止状态={cs_out.standstill}, "
-        #                 f"转向未按压计数={self.steering_unpressed}")
-
-        if cs_out.steeringPressed and (not self.CS.out.steerFaultTemporary or self.no_steer_warning):
-          self.no_steer_warning = True
+        # 用户正在主动转向时不显示警告
+        if cs_out.steeringPressed:
+            self.no_steer_warning = True
         else:
-          self.no_steer_warning = False
-
-          # 低速时延长警告触发时间
-          warning_threshold = int(2.5 / DT_CTRL) if cs_out.vEgo < low_speed_threshold else int(1.5 / DT_CTRL)
-          if self.silent_steer_warning or cs_out.standstill or self.steering_unpressed < warning_threshold:
-            self.silent_steer_warning = True
-            events.add(EventName.steerTempUnavailableSilent)
-          else:
-            events.add(EventName.steerTempUnavailable)
+            # 判断是否显示温和警告
+            show_silent = (self.silent_steer_warning or  # 已经在显示温和警告
+                         cs_out.standstill or  # 车辆静止
+                         self.steering_unpressed < int(1.5 / DT_CTRL))  # 最近操作过方向盘
+            
+            events.add(EventName.steerTempUnavailableSilent if show_silent else EventName.steerTempUnavailable)
+            self.silent_steer_warning = show_silent
+            self.no_steer_warning = False
     else:
-      self.no_steer_warning = False
-      self.silent_steer_warning = False
+        # 无故障时重置状态
+        self.no_steer_warning = False
+        self.silent_steer_warning = False
+    
+    # 永久性转向故障
     if cs_out.steerFaultPermanent:
-      # 添加更多故障判断条件
-      is_critical_fault = (
-        abs(cs_out.steeringAngleDeg) > 360.0 or  # 转向角度超限
-        abs(cs_out.steeringTorque) > 500.0 or    # 转向力矩超限
-        not cs_out.canValid                       # CAN通信故障
-      )
-      
-      if is_critical_fault:
-        # 只在首次触发或状态变化时记录错误日志
-        if not hasattr(self, '_last_fault_state') or self._last_fault_state != is_critical_fault:
-          cloudlog.error(f"永久转向故障触发: 车速={cs_out.vEgo:.1f}m/s, "
-                        f"方向盘角度={cs_out.steeringAngleDeg:.1f}度, "
-                        f"方向盘力矩={cs_out.steeringTorque:.1f}, "
-                        f"故障原因={'转向角度超限' if abs(cs_out.steeringAngleDeg) > 360.0 else '转向力矩超限' if abs(cs_out.steeringTorque) > 500.0 else 'CAN通信故障'}")
-          self._last_fault_state = is_critical_fault
         events.add(EventName.steerUnavailable)
-        
-        # 添加恢复机制
-        if not cs_out.steeringPressed and cs_out.standstill:
-          self.steering_recovery_counter += 1
-          if self.steering_recovery_counter > 100:  # 等待一段时间后尝试恢复
-            self.steering_recovery_counter = 0
-            # 执行恢复操作...
-        else:
-          self.steering_recovery_counter = 0
-    else:
-      self.no_steer_warning = False
-      self.silent_steer_warning = False
-
 
     # we engage when pcm is active (rising edge)
     # enabling can optionally be blocked by the car interface

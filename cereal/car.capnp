@@ -115,8 +115,8 @@ struct CarEvent @0x9b1657f34caf3ad3 {
     steerTimeLimit @115;
     vehicleSensorsInvalid @116;
     calibrationRecalibrating @117;
-    steerTempUnavailableCarMode @118;  # 低速大角度转向时的临时提醒
-    roadEdgeDetected @119;  # 道路边缘检测提醒
+    roadEdgeDetected @118;  # 道路边缘检测提醒
+    steerTorqueOver @119;  # 力矩过大
 
     radarCanErrorDEPRECATED @15;
     communityFeatureDisallowedDEPRECATED @62;
@@ -142,6 +142,7 @@ struct CarEvent @0x9b1657f34caf3ad3 {
     startupFuzzyFingerprintDEPRECATED @97;
     noTargetDEPRECATED @25;
     brakeUnavailableDEPRECATED @2;
+
   }
 }
 

@@ -7,14 +7,13 @@ from openpilot.common.realtime import Ratekeeper
 from pathlib import Path
 
 HERTZ = 1
-#DASHCAM_LOGS_PATH = '/data/media/0/c2_logs/dashcam_logs/'
 
 def dashcam_thread():
   # 修改订阅消息，添加 carState
   sm = messaging.SubMaster(['deviceState', 'carState'])
   params = Params()
   frame = 0
-  
+
   # 添加 P 档计时相关变量
   last_park_time = 0
   park_detected = False
@@ -22,7 +21,7 @@ def dashcam_thread():
 
   # 设置日志模块名称
   #cloudlog.bind_global(module='dashcamd')
-  #cloudlog.info("行车记录仪服务启动", log_dir=DASHCAM_LOGS_PATH)
+  #cloudlog.info("行车记录仪服务启动"H)
   #Path(DASHCAM_LOGS_PATH).mkdir(parents=True, exist_ok=True)
 
   # 读取配置
@@ -46,7 +45,7 @@ def dashcam_thread():
   # 如果启用了行车记录仪功能或处于开发者模式，立即开始录制
   started = dashcam_config['enabled'] or dev_mode
   if started:
-    #cloudlog.info(f"行车记录仪启动: enabled={dashcam_config['enabled']}, dev_mode={dev_mode}", log_dir=DASHCAM_LOGS_PATH)
+    #cloudlog.info(f"行车记录仪启动: enabled={dashcam_config['enabled']}, dev_mode={dev_mode}"H)
     dashcam.run(started=True, free_space=free_space)
 
   rk = Ratekeeper(HERTZ, print_delay_threshold=None)
@@ -58,18 +57,18 @@ def dashcam_thread():
       # 检测车辆是否挂 P 档
       if sm.updated['carState']:
         is_park = sm['carState'].gearShifter == 'park'
-        
+
         if is_park and not park_detected:
           park_detected = True
           last_park_time = time.monotonic()
         elif not is_park:
           park_detected = False
           last_park_time = 0
-        
+
         # 如果持续挂 P 档超过设定时间，重新开始录制
         if park_detected and (time.monotonic() - last_park_time) >= PARK_RESTART_DELAY:
           if started:
-            #cloudlog.info("检测到持续停车，重新开始录制", log_dir=DASHCAM_LOGS_PATH)
+            #cloudlog.info("检测到持续停车，重新开始录制"H)
             dashcam.restart_recording()
           last_park_time = time.monotonic()  # 重置计时器
 
@@ -102,14 +101,14 @@ def dashcam_thread():
         })
         dev_mode = new_dev_mode
 
-        #cloudlog.info(f"配置变更: old_config={old_config}, new_config={dashcam_config}, dev_mode={dev_mode}", log_dir=DASHCAM_LOGS_PATH)
+        #cloudlog.info(f"配置变更: old_config={old_config}, new_config={dashcam_config}, dev_mode={dev_mode}"H)
         dashcam.update_config(dashcam_config)
 
       # 根据配置和开发者模式决定是否启动录制
       new_started = dashcam_config['enabled'] or dev_mode
       if new_started != started:
         started = new_started
-        #cloudlog.info(f"录制状态变更: started={started}", log_dir=DASHCAM_LOGS_PATH)
+        #cloudlog.info(f"录制状态变更: started={started}"H)
 
       # 运行行车记录仪
       dashcam.run(started=started, free_space=free_space)

@@ -12,7 +12,6 @@ import cereal.messaging as messaging
 from cereal.visionipc import VisionIpcClient, VisionStreamType
 from openpilot.common.conversions import Conversions as CV
 from panda import ALTERNATIVE_EXPERIENCE
-from openpilot.common.swaglog import cloudlog
 from openpilot.system.version import is_release_branch, get_short_branch
 from openpilot.selfdrive.boardd.boardd import can_list_to_can_capnp
 from openpilot.selfdrive.car.car_helpers import get_car, get_startup_event, get_one_can
@@ -31,6 +30,8 @@ from openpilot.selfdrive.controls.lib.alertmanager import AlertManager, set_offr
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
 from openpilot.system.hardware import HARDWARE, TICI
 from openpilot.selfdrive.hybrid_modeld.constants import ModelConstants
+from openpilot.common.swaglog import cloudlog, add_file_handler
+from pathlib import Path
 
 SOFT_DISABLE_TIME = 3  # seconds
 LDW_MIN_SPEED = 31 * CV.MPH_TO_MS
@@ -71,6 +72,11 @@ DP_LONG_MISSING_LEAD_SPEED = 19.44  # 70 kph
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
+# # 添加控制模块日志路径配置
+# CONTROLS_LOG_DIR = "/data/media/0/c2_logs/controls_log"
+# Path(CONTROLS_LOG_DIR).mkdir(parents=True, exist_ok=True)
+# cloudlog.bind_global(module='Controls')
+# add_file_handler(cloudlog, CONTROLS_LOG_DIR, "Controls")
 
 def get_accel_from_plan(CP, speeds, accels):
   if len(speeds) == CONTROL_N and len(accels) == CONTROL_N:
@@ -85,15 +91,6 @@ def get_accel_from_plan(CP, speeds, accels):
 
 
 class Controls:
-  # ALKA Control Constants
-  LOW_SPEED_THRESHOLD = 3.0  # m/s (约11km/h) - 适应停车场低速操作
-  STEERING_ANGLE_THRESHOLD = 120  # degrees - 适应大角度转向需求
-  STEERING_RATE_THRESHOLD = 250.0  # degrees/s - 快速转向判断阈值
-  PARKING_SPEED_THRESHOLD = 5.0  # m/s
-  BASE_TORQUE_THRESHOLD = 500.0  # Nm
-  MAX_TORQUE_RATE = 800.0  # Nm/s
-  SPEED_SCALE_FACTOR = 0.5
-  LOW_SPEED_FACTOR = 0.8
   def __init__(self, sm=None, pm=None, can_sock=None, CI=None):
     config_realtime_process(4 if TICI else 3, Priority.CTRL_HIGH)
 
@@ -123,6 +120,7 @@ class Controls:
     self.dp_no_fan_ctrl = self.params.get_bool("dp_no_fan_ctrl")
     self.dp_0813 = self.params.get_bool("dp_0813")
     self._dp_alka = self.params.get_bool("dp_alka")
+    self.torqued_override = self.params.get_bool("dp_torqued_override")
     self._dp_alka_active = True
     self._dp_alka_trigger_count = 0
     self._dp_alka_btn_block_frame = 0
@@ -137,7 +135,9 @@ class Controls:
     self._dp_lat_lane_change_assist_speed = int(self.params.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.MPH_TO_MS
     self._dp_lateral_road_edge_detected = self.params.get_bool("dp_lateral_road_edge_detected")
     self._dp_road_edge_timer = 0.0  # 添加计时器变量
-    self.last_steering_torque = 0.0
+    # 添加ALKA力矩检查开关
+    self._dp_alka_torque_check = Params().get_bool("dp_alka_torque_check")
+
     self.sm = sm
     if self.sm is None:
       ignore = ['testJoystick']
@@ -281,9 +281,7 @@ class Controls:
     self.prof = Profiler(False)  # off by default
 
     # Fix LKA BUG
-    self.low_speed_steering = False
     self.last_steering_angle = 0.0  # 用于计算转向角速率
-    self.last_steering_torque = 0.0  # 用于计算力矩变化率
 
   def set_initial_state(self):
     if REPLAY:
@@ -723,7 +721,7 @@ class Controls:
     # Update Torque Params
     if self.CP.lateralTuning.which() == 'torque':
       torque_params = self.sm['liveTorqueParameters']
-      if self.sm.all_checks(['liveTorqueParameters']) and torque_params.useParams:
+      if self.sm.all_checks(['liveTorqueParameters']) and torque_params.useParams and not self.torqued_override:
         self.LaC.update_live_torque_params(torque_params.latAccelFactorFiltered, torque_params.latAccelOffsetFiltered,
                                            torque_params.frictionCoefficientFiltered)
 
@@ -734,87 +732,69 @@ class Controls:
     CC = car.CarControl.new_message()
     CC.enabled = self.enabled
 
-    # ALKA Control begin
-    # 计算转向角速率和力矩变化率
-    steering_rate = abs(CS.steeringAngleDeg - self.last_steering_angle) / DT_CTRL
-    torque_rate = abs(CS.steeringTorque - self.last_steering_torque) / DT_CTRL
-    self.last_steering_angle = CS.steeringAngleDeg
-    self.last_steering_torque = CS.steeringTorque
-
-    # 根据车速动态调整阈值
-    speed_factor = max(1.0, CS.vEgo * self.SPEED_SCALE_FACTOR)
-    angle_threshold = self.STEERING_ANGLE_THRESHOLD / (speed_factor ** 0.5)  # 使用平方根关系
-    rate_threshold = self.STEERING_RATE_THRESHOLD * (self.LOW_SPEED_FACTOR if CS.vEgo < 2.0 else 1.0)
-    torque_threshold = self.BASE_TORQUE_THRESHOLD * (1.0 + speed_factor * 0.5)  # 非线性增长
-
-    # 检查低速大角度快速转向和异常力矩
-    steering_condition = abs(CS.steeringAngleDeg) > angle_threshold and steering_rate > rate_threshold
-    torque_condition = abs(CS.steeringTorque) > torque_threshold or torque_rate > self.MAX_TORQUE_RATE
-    self.low_speed_steering = CS.vEgo < self.LOW_SPEED_THRESHOLD and (steering_condition or torque_condition)
-
-    # 添加CAN状态和故障检查
-    can_valid = (CS.canValid and 
-                 not CS.steerFaultTemporary and 
-                 not CS.steerFaultPermanent)
-
-    # 停车和停车场模式判断
+    # Check which actuators can be enabled
+    # 判断车辆是否处于静止状态：车速低于最小转向速度或车辆完全静止
     standstill = CS.vEgo <= max(self.CP.minSteerSpeed, MIN_LATERAL_CONTROL_SPEED) or CS.standstill
-    is_parking_speed = CS.vEgo < self.PARKING_SPEED_THRESHOLD
-    is_parking_maneuver = (CS.gearShifter == car.CarState.GearShifter.reverse or
-                          abs(CS.steeringAngleDeg) > self.STEERING_ANGLE_THRESHOLD)
-
-    CC.latActive = (self.active and 
-                   can_valid and 
-                   (not standstill or self.joystick_mode) and
-                   not self.low_speed_steering and
-                   not (is_parking_speed and is_parking_maneuver))
+    
+    # 设置横向控制激活条件：系统激活 + 无转向故障 + (非静止状态或游戏手柄模式)
+    CC.latActive = self.active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
+                   (not standstill or self.joystick_mode)
+    
+    # 设置纵向控制激活条件：系统已启用 + 无纵向控制覆盖 + 开启了openpilot纵向控制
     CC.longActive = self.enabled and not self.events.contains(ET.OVERRIDE_LONGITUDINAL) and self.CP.openpilotLongitudinalControl
 
-    # ALKA Control
-    if (self._dp_alka and self._dp_alka_active) and not standstill and CS.cruiseState.available:
-      # 检查校准状态
-      if self.sm['liveCalibration'].calStatus != log.LiveCalibrationData.Status.calibrated:
-        CC.latActive = False
-      # 检查转向故障
-      elif CS.steerFaultTemporary or CS.steerFaultPermanent:
-        CC.latActive = False
-        self.events.add(EventName.steerTempUnavailable)
-      # 倒车检查
-      elif CS.gearShifter == car.CarState.GearShifter.reverse:
-        CC.latActive = False
-      # 低速转向检查
-      elif self.low_speed_steering:
-        CC.latActive = False
-        self.events.add(EventName.steerTempUnavailableCarMode)
-      # 停车场模式检查
-      elif is_parking_speed and is_parking_maneuver:
-        CC.latActive = False
-        self.events.add(EventName.parkingManeuver)
-      # 所有检查都通过，允许横向控制
+    # ALKA (Always On Lateral Keep Assist) 模式的额外激活条件
+    if (self._dp_alka and             # ALKA功能已启用
+        self._dp_alka_active and      # ALKA当前处于激活状态
+        not standstill and            # 车辆非静止
+        CS.cruiseState.available and  # 巡航系统可用
+        abs(CS.steeringAngleDeg) < 450 and  # 方向盘转角小于450度
+        self.sm['liveCalibration'].calStatus == log.LiveCalibrationData.Status.calibrated and  # 相机已校准
+        not CS.steerFaultTemporary and   # 无临时转向故障
+        not CS.steerFaultPermanent and   # 无永久转向故障
+        CS.gearShifter != car.CarState.GearShifter.reverse):  # 非倒车状态
+
+      if self._dp_alka_torque_check:
+        # 原有的力矩检查逻辑
+        max_driver_torque = interp(CS.vEgo, 
+                                [0, 5, 10, 20],  # m/s
+                                [1.0, 0.8, 0.65, 0.5])  # 力矩系数
+        eps_torque = abs(CS.steeringTorqueEps)
+        driver_torque = abs(CS.steeringTorque - CS.steeringTorqueEps)
+        
+        eps_ok = eps_torque < (150 * max_driver_torque)
+        driver_ok = driver_torque < (200 * max_driver_torque)
+        total_torque_ok = abs(CS.steeringTorque) < (500 * max_driver_torque)
+        
+        current_angle_rate = abs(CS.steeringAngleDeg - self.last_steering_angle) / DT_CTRL
+        angle_rate_ok = current_angle_rate < 94.9461
+        
+        if eps_ok and driver_ok and total_torque_ok and angle_rate_ok:
+          CC.latActive = True
+        else:
+          self.events.add(EventName.steerTorqueOver)
       else:
+        # 不检查力矩时直接激活
         CC.latActive = True
-    # ALKA Control end
+      self.last_steering_angle = CS.steeringAngleDeg
+
+
 
     # rick - assist-less lane change
-    # 检查是否启用了无辅助变道功能
     if self._dp_lat_lane_change_assist_disabled:
-        # 当转向灯都关闭时，重置状态
-        if not CS.leftBlinker and not CS.rightBlinker:
-            self._dp_lat_lane_change_assist_disabled_active = False
-        # 激活条件：
-        # 1. 当前未处于无辅助变道状态
-        # 2. 方向盘被按下
-        # 3. 左转向灯打开且向左转方向盘，或右转向灯打开且向右转方向盘
-        if not self._dp_lat_lane_change_assist_disabled_active and CS.steeringPressed and \
-            ((CS.steeringTorque > 0 and CS.leftBlinker) or
-            (CS.steeringTorque < 0 and CS.rightBlinker)):
-            self._dp_lat_lane_change_assist_disabled_active = True
-        # 当无辅助变道激活时：
-        # 1. 添加变道事件通知
-        # 2. 禁用横向控制
-        if self._dp_lat_lane_change_assist_disabled_active:
-            self.events.add(EventName.laneChange)
-            CC.latActive = False
+      # de-activate
+      if not CS.leftBlinker and not CS.rightBlinker:
+        self._dp_lat_lane_change_assist_disabled_active = False
+
+      # activate
+      if not self._dp_lat_lane_change_assist_disabled_active and CS.steeringPressed and \
+        ((CS.steeringTorque > 0 and CS.leftBlinker) or
+         (CS.steeringTorque < 0 and CS.rightBlinker)):
+        self._dp_lat_lane_change_assist_disabled_active = True
+
+      if self._dp_lat_lane_change_assist_disabled_active:
+        self.events.add(EventName.laneChange)
+        CC.latActive = False
 
     # rick - vag timebomb bypass
     if self._dp_vag_timebomb_bypass:
