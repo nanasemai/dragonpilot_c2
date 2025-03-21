@@ -214,8 +214,8 @@ def main() -> NoReturn:
             # 使用 SwaglogRotatingFileHandler 替代直接写文件
             custom_handler = SwaglogRotatingFileHandler(
               base_filename=log_file,
-              max_bytes=512*1024,
-              backup_count=500
+              max_bytes=256*1024,
+              backup_count=1000
             )
             custom_handler.setFormatter(FilteredLogFormatter(None))
             custom_handler.emit(formatted_record)

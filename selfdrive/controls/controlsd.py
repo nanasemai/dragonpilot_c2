@@ -280,9 +280,6 @@ class Controls:
     self.rk = Ratekeeper(100, print_delay_threshold=None)
     self.prof = Profiler(False)  # off by default
 
-    # Fix LKA BUG
-    self.last_steering_angle = 0.0  # 用于计算转向角速率
-
   def set_initial_state(self):
     if REPLAY:
       controls_state = Params().get("ReplayControlsState")
@@ -753,7 +750,7 @@ class Controls:
         not CS.steerFaultTemporary and   # 无临时转向故障
         not CS.steerFaultPermanent and   # 无永久转向故障
         CS.gearShifter != car.CarState.GearShifter.reverse):  # 非倒车状态
-        
+
         CC.latActive = True
 
     # rick - assist-less lane change

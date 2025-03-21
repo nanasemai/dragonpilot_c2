@@ -56,7 +56,7 @@ class SwagLogger(logging.Logger):
             # 构建事件数据
             event_data = {"event": name}
             event_data.update(kwargs)
-            
+
             # 根据是否包含错误信息决定日志级别
             if 'error' in kwargs:
                 self.error(event_data)
@@ -70,7 +70,7 @@ class SwagLogger(logging.Logger):
         """创建一个临时的日志上下文"""
         from contextlib import contextmanager
         import copy
-        
+
         @contextmanager
         def _ctx():
             old_ctx = getattr(self.log_local, 'ctx', {})
@@ -88,12 +88,12 @@ class SwagLogger(logging.Logger):
             tstp = {"timestamp": {"event": event_name, "time": t*1e9}}
             self.debug(tstp)
 
-    def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=False, 
+    def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=False,
              stacklevel=1, log_dir=None, module_name=None):
         """重写_log方法以支持额外参数"""
         if module_name:
             self.bind(module=module_name)
-        
+
         # 如果msg是字符串且有额外参数，转换为字典格式
         if isinstance(msg, str) and (log_dir or module_name):
             msg_dict = {
@@ -132,7 +132,7 @@ class SwagFormatter(logging.Formatter):
             timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:23]
             level = record.levelname
             module = self.swaglogger.get_ctx().get('module', 'unknown') if self.swaglogger else 'unknown'
-            
+
             # 处理不同类型的消息
             if isinstance(record.msg, dict):
                 msg = str(record.msg)
@@ -141,7 +141,7 @@ class SwagFormatter(logging.Formatter):
                     msg = record.getMessage()
                 except (ValueError, TypeError):
                     msg = str([record.msg] + record.args)
-            
+
             # 构建完整日志行
             log_parts = [
                 timestamp,
@@ -149,19 +149,19 @@ class SwagFormatter(logging.Formatter):
                 f"{module:15s}",
                 msg
             ]
-            
+
             # 添加异常信息
             if record.exc_info:
                 log_parts.append(self.formatException(record.exc_info))
-      
+
             return " | ".join(filter(None, log_parts))
-            
+
         except Exception as e:
             return f"日志格式化失败: {str(e)}"
 
 class SwaglogRotatingFileHandler(BaseRotatingHandler):
-    def __init__(self, base_filename, module_name=None, max_bytes=512*1024, 
-                 interval=300, backup_count=500):
+    def __init__(self, base_filename, module_name=None, max_bytes=256*1024,
+                 interval=180, backup_count=1000):
         super().__init__(base_filename, 'a', encoding='utf-8')
         self.module_name = module_name
         self.max_bytes = max_bytes
@@ -174,10 +174,10 @@ class SwaglogRotatingFileHandler(BaseRotatingHandler):
     def shouldRollover(self, record):
         if not self.stream:
             return False
-            
+
         msg_size = len(self.format(record).encode('utf-8'))
         self._current_size += msg_size
-        
+
         time_since_last = time.monotonic() - self.last_rollover
         return (self.max_bytes > 0 and self._current_size >= self.max_bytes) or \
                (time_since_last > max(self.interval, 60) and self._current_size >= 1024)
@@ -191,11 +191,11 @@ class SwaglogRotatingFileHandler(BaseRotatingHandler):
         base_dir = os.path.dirname(self.baseFilename)
         base_name = os.path.basename(self.baseFilename)
         name_without_index = '.'.join(base_name.split('.')[:-2])  # 移除序号和.log后缀
-        
+
         # 查找当前目录下的所有相关日志文件
-        existing_files = [f for f in os.listdir(base_dir) 
+        existing_files = [f for f in os.listdir(base_dir)
                         if f.startswith(name_without_index) and f.endswith('.log')]
-        
+
         # 找到最大的序号
         max_index = 0
         for f in existing_files:
@@ -206,7 +206,7 @@ class SwaglogRotatingFileHandler(BaseRotatingHandler):
                     max_index = max(max_index, int(index_str))
             except (ValueError, IndexError):
                 continue
-        
+
         # 生成新的文件名，序号加1
         new_name = os.path.join(
             base_dir,
@@ -216,7 +216,7 @@ class SwaglogRotatingFileHandler(BaseRotatingHandler):
         self.baseFilename = new_name
         self._current_size = 0
         self.last_rollover = time.monotonic()
-        
+
         if self.stream:
             self.stream = self._open()
 
@@ -314,12 +314,12 @@ class NiceOrderedDict(OrderedDict):
 # 用于测试的代码
 if __name__ == "__main__":
     log = SwagLogger()
-    
+
     # 设置控制台处理器
     console = logging.StreamHandler()
     console.setFormatter(SwagFormatter(log))
     log.addHandler(console)
-    
+
     # 测试日志输出
     log.info("测试日志")
     log.bind(module="test")
