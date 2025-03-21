@@ -104,23 +104,31 @@ class SwaglogRotatingFileHandler(BaseRotatingHandler):
             self.stream.close()
             self.stream = None
 
-        # 解析当前文件名的基本部分
+        # 解析当前文件名
         base_dir = os.path.dirname(self.baseFilename)
         base_name = os.path.basename(self.baseFilename)
+        name_without_index = '.'.join(base_name.split('.')[:-2])  # 移除序号和.log后缀
         
-        # 如果文件名已经包含时间戳，则使用新的时间戳
-        date_str = time.strftime("%Y%m%d_%H%M%S")
+        # 查找当前目录下的所有相关日志文件
+        existing_files = [f for f in os.listdir(base_dir) 
+                        if f.startswith(name_without_index) and f.endswith('.log')]
         
-        # 生成新的文件名，格式：原始名称.序号.log
-        file_idx = 1
-        while True:
-            new_name = os.path.join(
-                base_dir,
-                f"{os.path.splitext(base_name)[0]}.{file_idx:03d}.log"
-            )
-            if not os.path.exists(new_name):
-                break
-            file_idx += 1
+        # 找到最大的序号
+        max_index = 0
+        for f in existing_files:
+            try:
+                # 提取序号部分 (.000.log, .001.log 等)
+                index_str = f.split('.')[-2]
+                if index_str.isdigit() and len(index_str) == 3:
+                    max_index = max(max_index, int(index_str))
+            except (ValueError, IndexError):
+                continue
+        
+        # 生成新的文件名，序号加1
+        new_name = os.path.join(
+            base_dir,
+            f"{name_without_index}.{(max_index + 1):03d}.log"
+        )
 
         self.baseFilename = new_name
         self._current_size = 0

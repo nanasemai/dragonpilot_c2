@@ -131,9 +131,10 @@ def create_log_handler():
     date_str = time.strftime('%Y%m%d_%H%M%S')
     session_id = hex(int(time.time()))[2:]
 
+    # 创建主日志文件
     log_file = os.path.join(
       SWAGLOG_DIR,
-      f"swaglog.{date_str}.{session_id}.log"  # 主文件使用
+      f"swaglog.{date_str}.{session_id}.000.log"  # 添加 .000 序号
     )
 
     handler = SwaglogRotatingFileHandler(
@@ -207,11 +208,19 @@ def main() -> NoReturn:
 
             log_file = os.path.join(
               custom_log_dir,
-              f"{module}.{date_str}.{session_id}.log"  # 主文件
+              f"{module}.{date_str}.{session_id}.000.log"
             )
 
-            with open(log_file, 'a', encoding='utf-8') as f:
-              f.write(formatted_record + "\n")
+            # 使用 SwaglogRotatingFileHandler 替代直接写文件
+            custom_handler = SwaglogRotatingFileHandler(
+              base_filename=log_file,
+              max_bytes=512*1024,
+              backup_count=500
+            )
+            custom_handler.setFormatter(FilteredLogFormatter(None))
+            custom_handler.emit(formatted_record)
+            custom_handler.close()
+
           except Exception as e:
             print(f"Error writing to custom log: {e}")
 
