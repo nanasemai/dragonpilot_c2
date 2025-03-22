@@ -30,11 +30,33 @@ class FilteredLogFormatter(SwagFormatter):
       'boardd': logging.WARNING,
       'logmessaged': logging.WARNING,
       'camerad': logging.WARNING,
-      'ui': logging.WARNING
+      'ui': logging.WARNING,
+      'onroad': logging.WARNING  # 添加onroad模块的日志级别控制
     }
-    self.current_record = None
+    self.log_cache = {}
+    self.log_cache_timeout = 5
+    self.last_cleanup_time = time.time()
+    self.cleanup_interval = 600
 
   def _should_log(self, module: str, log_level: int, message_size: int = 0) -> bool:
+    # 清理过期缓存
+    self._cleanup_cache()
+    
+    # 检查是否是重复日志
+    cache_key = f"{module}_{message_size}"
+    current_time = time.time()
+    
+    if cache_key in self.log_cache:
+      last_time, count = self.log_cache[cache_key]
+      if current_time - last_time < self.log_cache_timeout:
+        if log_level >= logging.ERROR:  # ERROR级别始终记录
+          return True
+        self.log_cache[cache_key] = (last_time, count + 1)
+        return False
+    
+    self.log_cache[cache_key] = (current_time, 1)
+
+    # 原有的日志过滤逻辑
     if 'gpu' in module.lower() or module == 'modeld':
       return True
 
@@ -52,31 +74,42 @@ class FilteredLogFormatter(SwagFormatter):
 
     return True
 
+  def _cleanup_cache(self):
+    """清理过期的日志缓存"""
+    current_time = time.time()
+    if current_time - self.last_cleanup_time > self.cleanup_interval:
+      expired_keys = [
+        k for k, (t, _) in self.log_cache.items()
+        if current_time - t > self.log_cache_timeout
+      ]
+      for k in expired_keys:
+        del self.log_cache[k]
+      self.last_cleanup_time = current_time
+
   def format(self, record):
     try:
       self.current_record = record
       data = self._parse_record(record)
-
-      # 检查是否已经是格式化过的消息
-      if isinstance(data, dict) and 'msg' in data:
-        msg = data['msg']
-        if isinstance(msg, str) and ' | ' in msg:
-          # 如果消息已经包含格式化的内容，直接返回原始消息
-          return msg
-
+      
       # 提取日志信息
       module = self._extract_module(data)
       level = data.get('level', 'INFO')
       log_level = data.get('levelnum', logging.INFO)
       message = self._format_message(data)
-      timestamp = self._get_timestamp(data)
-
+      
       # 检查是否应该记录
       message_size = len(str(record)) if record else 0
       if not self._should_log(module, log_level, message_size):
         return None
+        
+      # 如果是重复日志，添加重复次数
+      cache_key = f"{module}_{message_size}"
+      if cache_key in self.log_cache:
+        _, count = self.log_cache[cache_key]
+        if count > 1:
+          message = f"{message} (重复 {count} 次)"
 
-      # 简化格式，移除线程信息和调用位置
+      timestamp = self._get_timestamp(data)
       return f"{timestamp} | {level:7s} | {module:15s} | {message}"
 
     except Exception as e:

@@ -36,6 +36,42 @@ class SwagLogger(logging.Logger):
         self.log_local.ctx = {}
         self._custom_handlers = {}
         self._error_handlers = {}
+        # 添加日志缓存
+        self.log_cache = {}
+        self.log_cache_timeout = 5
+        self.last_cleanup_time = time.time()
+        self.cleanup_interval = 600
+
+    def _should_log(self, msg, level):
+        """判断是否需要记录日志"""
+        current_time = time.time()
+        module = self.get_ctx().get('module', 'unknown')
+        cache_key = f"{module}_{msg}_{level}"
+
+        # 清理过期缓存
+        if current_time - self.last_cleanup_time > self.cleanup_interval:
+            self._cleanup_cache(current_time)
+
+        if cache_key in self.log_cache:
+            last_time, count = self.log_cache[cache_key]
+            if current_time - last_time < self.log_cache_timeout:
+                if level >= logging.ERROR:  # ERROR级别始终记录
+                    return True
+                self.log_cache[cache_key] = (last_time, count + 1)
+                return False
+            
+        self.log_cache[cache_key] = (current_time, 1)
+        return True
+
+    def _cleanup_cache(self, current_time):
+        """清理过期的日志缓存"""
+        expired_keys = [
+            k for k, (t, _) in self.log_cache.items()
+            if current_time - t > self.log_cache_timeout
+        ]
+        for k in expired_keys:
+            del self.log_cache[k]
+        self.last_cleanup_time = current_time
 
     def get_ctx(self):
         if not hasattr(self.log_local, 'ctx'):
@@ -90,19 +126,28 @@ class SwagLogger(logging.Logger):
 
     def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=False,
              stacklevel=1, log_dir=None, module_name=None):
-        """重写_log方法以支持额外参数"""
+        """重写_log方法以支持额外参数和日志去重"""
         if module_name:
             self.bind(module=module_name)
 
-        # 如果msg是字符串且有额外参数，转换为字典格式
-        if isinstance(msg, str) and (log_dir or module_name):
-            msg_dict = {
-                "msg": msg,
-                "log_dir": log_dir,
-                "module": module_name
-            }
-            msg = msg_dict
-            args = ()
+        # 格式化消息
+        formatted_msg = str(msg) if isinstance(msg, dict) else (
+            msg % args if args else str(msg)
+        )
+
+        # 检查是否需要记录该日志
+        if not self._should_log(formatted_msg, level):
+            return None
+
+        # 如果是重复日志，添加重复次数
+        cache_key = f"{self.get_ctx().get('module', 'unknown')}_{formatted_msg}_{level}"
+        if cache_key in self.log_cache:
+            _, count = self.log_cache[cache_key]
+            if count > 1:
+                if isinstance(msg, dict):
+                    msg['repeat_count'] = count
+                else:
+                    msg = f"{msg} (重复 {count} 次)"
 
         return super()._log(level, msg, args, exc_info, extra, stack_info, stacklevel)
 

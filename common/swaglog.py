@@ -1,9 +1,7 @@
 import logging
 import os
-import traceback
+import time
 import warnings
-import datetime
-import threading
 import zmq
 from openpilot.common.logging_extra import (
     SwagLogger, SwagFormatter
@@ -50,56 +48,73 @@ class SwagLogManager:
         self.logger.setLevel(logging.DEBUG)
         self._setup_handlers()
         self._wrap_log_methods()
+        self.log_cache = {}
+        self.log_cache_timeout = 5
+        self.last_cleanup_time = time.time()
+        self.cleanup_interval = 600  # 10分钟清理一次缓存
+
+    def _cleanup_cache(self):
+        """清理过期的日志缓存"""
+        current_time = time.time()
+        if current_time - self.last_cleanup_time > self.cleanup_interval:
+            expired_keys = [
+                k for k, (t, _) in self.log_cache.items()
+                if current_time - t > self.log_cache_timeout
+            ]
+            for k in expired_keys:
+                del self.log_cache[k]
+            self.last_cleanup_time = current_time
 
     def _setup_handlers(self):
         """设置日志处理器"""
-        # 只保留控制台输出和消息转发
+        # 控制台输出处理器
         console_handler = logging.StreamHandler()
         console_handler.setLevel(self._get_console_log_level())
         console_handler.setFormatter(SwagFormatter(self.logger))
         self.logger.addHandler(console_handler)
 
-        # 转发到 logmessaged
+        # 转发到 logmessaged 的处理器
         socket_handler = UnixDomainSocketHandler(SwagFormatter(self.logger))
         socket_handler.setLevel(logging.DEBUG)
         self.logger.addHandler(socket_handler)
-
-
 
     def _get_console_log_level(self):
         """获取控制台日志级别"""
         params = Params()
         dp_log_level = params.get("dp_log_level", encoding='utf8')
-        
+
         if dp_log_level is not None:
             level_map = {"0": "warning", "1": "info", "2": "debug"}
             print_level = level_map.get(dp_log_level, "warning")
+            return getattr(logging, print_level.upper())
+        return logging.WARNING
+
+    def _should_log(self, msg, level):
+        """判断是否需要记录日志"""
+        current_time = time.time()
+        # 添加模块名到缓存键中
+        module_name = self.logger.get_ctx().get('module', 'unknown')
+        cache_key = f"{module_name}_{msg}_{level}"
+
+        if cache_key in self.log_cache:
+            last_time, count = self.log_cache[cache_key]
+            if current_time - last_time < self.log_cache_timeout:
+                # 对于ERROR级别的日志，始终记录
+                if level == logging.ERROR:
+                    return True
+                self.log_cache[cache_key] = (last_time, count + 1)
+                return False
+            else:
+                if count > 1:
+                    summary_msg = f"{msg} (在过去 {self.log_cache_timeout} 秒内重复 {count} 次)"
+                    self.logger._log(level, summary_msg, ())
+                self.log_cache[cache_key] = (current_time, 1)
+                return True
         else:
-            print_level = os.environ.get('LOGPRINT', 'warning')
-
-        return {
-            'debug': logging.DEBUG,
-            'info': logging.INFO,
-            'warning': logging.WARNING
-        }.get(print_level, logging.WARNING)
-
-
-    def _get_caller_info(self):
-        """获取调用者信息"""
-        try:
-            for frame in traceback.extract_stack()[:-2]:
-                if not frame[0].endswith('swaglog.py'):
-                    return {
-                        'file': frame[0],
-                        'line': frame[1],
-                        'func': frame[2]
-                    }
-        except Exception:
-            pass
-        return None
+            self.log_cache[cache_key] = (current_time, 1)
+            return True
 
     def _wrap_log_method(self, original_method, level_name):
-        """包装日志方法"""
         def wrapped_method(msg, *args, **kwargs):
             if not msg and not args:
                 return None
@@ -118,6 +133,10 @@ class SwagLogManager:
                 formatted_msg = str(msg) if isinstance(msg, dict) else (
                     msg % args if args else str(msg)
                 )
+
+                # 检查是否需要记录该日志
+                if not self._should_log(formatted_msg, logging.getLevelName(level_name)):
+                    return None
 
                 # 获取当前模块
                 current_module = module_name or self.logger.get_ctx().get('module', 'unknown')
