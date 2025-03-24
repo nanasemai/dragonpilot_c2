@@ -477,7 +477,7 @@ def main() -> None:
   params = Params()
 
   if params.get_bool("DisableUpdates"):
-    cloudlog.warning("updates are disabled by the DisableUpdates param")
+    cloudlog.info("updates are disabled by the DisableUpdates param")
     exit(0)
 
   with open(LOCK_FILE, 'w') as ov_lock_fd:

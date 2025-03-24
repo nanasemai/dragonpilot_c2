@@ -60,8 +60,6 @@ class GpxUploader():
     self._delete_after_upload = True
     self._version = get_version()
     self._branch = get_branch()
-    # 设置日志模块名称
-    cloudlog.bind_global(module='gpx_uploader')
     cloudlog.debug("初始化 GpxUploader")
     # 确保日志和视频目录存在
     Path(GPX_LOG_PATH).mkdir(parents=True, exist_ok=True)

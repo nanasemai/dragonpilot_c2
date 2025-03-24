@@ -19,11 +19,6 @@ def dashcam_thread():
   park_detected = False
   PARK_RESTART_DELAY = 5  # 5秒后重新开始录制
 
-  # 设置日志模块名称
-  #cloudlog.bind_global(module='dashcamd')
-  #cloudlog.info("行车记录仪服务启动"H)
-  #Path(DASHCAM_LOGS_PATH).mkdir(parents=True, exist_ok=True)
-
   # 读取配置
   dashcam_config = {
     'enabled': params.get_bool("dp_on_road_dashcam"),

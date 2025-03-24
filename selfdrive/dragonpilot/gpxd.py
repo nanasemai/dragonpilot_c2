@@ -27,8 +27,6 @@ class GpxD:
     # 确保日志目录存在
     Path(GPX_LOG_PATH).mkdir(parents=True, exist_ok=True)
 
-    # 修改日志初始化方式，使用自定义日志目录
-    cloudlog.bind_global(module='gpxd')
     self.session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     cloudlog.bind(session_id=self.session_id)
 

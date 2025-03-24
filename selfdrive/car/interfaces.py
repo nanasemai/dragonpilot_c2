@@ -41,11 +41,6 @@ TORQUE_SUBSTITUTE_PATH = os.path.join(BASEDIR, 'selfdrive/car/torque_data/substi
 # dict used to rename activation functions whose names aren't valid python identifiers
 ACTIVATION_FUNCTION_NAMES = {'σ': 'sigmoid'}
 
-# 添加 NNFF 日志路径配置
-NNFF_LOG_DIR = "/data/media/0/c2_logs/nnff_log"
-Path(NNFF_LOG_DIR).mkdir(parents=True, exist_ok=True)
-
-
 def similarity(s1: str, s2: str) -> float:
   return SequenceMatcher(None, s1, s2).ratio()
 
@@ -164,12 +159,12 @@ def get_nn_model_path(car, eps_firmware) -> Optional[str]:
   def check_nn_path(check_model):
     model_path = None
     max_similarity = -1.0
-    #cloudlog.info(f"NNFF: 开始搜索模型 - 车型: {check_model}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+    #cloudlog.info(f"NNFF: 开始搜索模型 - 车型: {check_model}")
     for f in os.listdir(TORQUE_NN_MODEL_PATH):
       if f.endswith(".json"):
         model = f.replace(".json", "").replace(f"{TORQUE_NN_MODEL_PATH}/", "")
         similarity_score = similarity(model, check_model)
-        #cloudlog.debug(f"NNFF 模型匹配度: {model} -> {similarity_score:.3f}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+        #cloudlog.debug(f"NNFF 模型匹配度: {model} -> {similarity_score:.3f}")
         if similarity_score > max_similarity:
           max_similarity = similarity_score
           model_path = os.path.join(TORQUE_NN_MODEL_PATH, f)
@@ -178,21 +173,21 @@ def get_nn_model_path(car, eps_firmware) -> Optional[str]:
   if len(eps_firmware) > 3:
     eps_firmware = eps_firmware.replace("\\", "")
     check_model = f"{car} {eps_firmware}"
-    #cloudlog.info(f"NNFF: 尝试使用带固件版本的模型匹配 - {check_model}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+    #cloudlog.info(f"NNFF: 尝试使用带固件版本的模型匹配 - {check_model}")
   else:
     check_model = car
-    #cloudlog.info(f"NNFF: 使用车型名称匹配 - {check_model}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+    #cloudlog.info(f"NNFF: 使用车型名称匹配 - {check_model}")
 
   model_path, max_similarity = check_nn_path(check_model)
   if car not in model_path or 0.0 <= max_similarity < 0.9:
-    cloudlog.warning(f"NNFF: 首次匹配失败，尝试仅使用车型名称 - {car}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+    cloudlog.warning(f"NNFF: 首次匹配失败，尝试仅使用车型名称 - {car}")
     check_model = car
     model_path, max_similarity = check_nn_path(check_model)
     if car not in model_path or 0.0 <= max_similarity < 0.9:
-      cloudlog.error(f"NNFF: 模型匹配失败 - 车型: {car}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+      cloudlog.error(f"NNFF: 模型匹配失败 - 车型: {car}")
       model_path = None
   else:
-    cloudlog.info(f"NNFF: 模型匹配成功 - 路径: {model_path}, 匹配度: {max_similarity:.3f}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+    cloudlog.info(f"NNFF: 模型匹配成功 - 路径: {model_path}, 匹配度: {max_similarity:.3f}")
   return model_path
 
 
@@ -244,15 +239,15 @@ class CarInterfaceBase(ABC):
 
   def get_ff_nn(self, x):
     if not isinstance(x, (list, tuple, np.ndarray)):
-      cloudlog.error("NNFF: 输入数据类型错误", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+      cloudlog.error("NNFF: 输入数据类型错误")
       return 0.0
     if self.lat_torque_nn_model is not None:
       try:
         result = self.lat_torque_nn_model.evaluate(x)
-        #cloudlog.debug(f"NNFF 评估: 输入={x}, 输出={result:.6f}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+        #cloudlog.debug(f"NNFF 评估: 输入={x}, 输出={result:.6f}")
         return result
       except Exception as e:
-        cloudlog.exception(f"NNFF 评估错误: {str(e)}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+        cloudlog.exception(f"NNFF 评估错误: {str(e)}")
         return 0.0
     return 0.0
 
@@ -262,14 +257,14 @@ class CarInterfaceBase(ABC):
     return car in data
 
   def initialize_lat_torque_nn(self, car, eps_firmware) -> bool:
-    cloudlog.info(f"NNFF: 开始初始化神经网络模型 - 车型: {car}, EPS固件: {eps_firmware}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+    cloudlog.info(f"NNFF: 开始初始化神经网络模型 - 车型: {car}, EPS固件: {eps_firmware}")
     self.lat_torque_nn_model = get_nn_model(car, eps_firmware)
     if self.lat_torque_nn_model is not None:
-      cloudlog.info(f"NNFF: 模型初始化成功 - 车型: {car}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+      cloudlog.info(f"NNFF: 模型初始化成功 - 车型: {car}")
       if hasattr(self.lat_torque_nn_model, 'friction_override'):
-        cloudlog.info(f"NNFF: 摩擦力覆盖状态: {self.lat_torque_nn_model.friction_override}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+        cloudlog.info(f"NNFF: 摩擦力覆盖状态: {self.lat_torque_nn_model.friction_override}")
     else:
-      cloudlog.warning(f"NNFF: 模型初始化失败 - 车型: {car}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+      cloudlog.warning(f"NNFF: 模型初始化失败 - 车型: {car}")
     return self.lat_torque_nn_model is not None
 
   @staticmethod
@@ -302,7 +297,7 @@ class CarInterfaceBase(ABC):
       eps_firmware = str(next((fw.fwVersion for fw in car_fw if fw.ecu == "eps"), ""))
       model = get_nn_model_path(candidate, eps_firmware)
       if model is not None:
-        cloudlog.info(f"NNFF 模型加载成功: {model}", log_dir=NNFF_LOG_DIR, module_name="NNFF")
+        cloudlog.info(f"NNFF 模型加载成功: {model}")
         Params().put("NNFFModelName", candidate.replace("_", " "))
 
     # Vehicle mass is published curb weight plus assumed payload such as a human driver; notCars have no assumed payload
@@ -530,7 +525,7 @@ class CarInterfaceBase(ABC):
 
     # 永久性转向故障
     if cs_out.steerFaultPermanent:
-      cloudlog.error("永久性转向故障触发:", 
+      cloudlog.error("永久性转向故障触发:",
                       " 车速:", cs_out.vEgo * 3.6,  # 转换为km/h
                       " EPS力矩:", cs_out.steeringTorqueEps,
                       " 驾驶员力矩:", cs_out.steeringTorque - cs_out.steeringTorqueEps,

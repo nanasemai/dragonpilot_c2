@@ -54,8 +54,6 @@ class OSM():
     self.way_id = 0
     self.road_name = None
     self.speed_limit = 0
-    # 修改日志初始化
-    cloudlog.bind_global(module='mapd')
     cloudlog.bind(component='osm')
     # 确保日志目录存在
     Path(OSM_LOG_PATH).mkdir(parents=True, exist_ok=True)

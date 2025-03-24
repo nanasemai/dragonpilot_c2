@@ -72,11 +72,6 @@ DP_LONG_MISSING_LEAD_SPEED = 19.44  # 70 kph
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 
-# # 添加控制模块日志路径配置
-# CONTROLS_LOG_DIR = "/data/media/0/c2_logs/controls_log"
-# Path(CONTROLS_LOG_DIR).mkdir(parents=True, exist_ok=True)
-# cloudlog.bind_global(module='Controls')
-
 
 def get_accel_from_plan(CP, speeds, accels):
   if len(speeds) == CONTROL_N and len(accels) == CONTROL_N:

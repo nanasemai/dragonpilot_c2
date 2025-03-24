@@ -215,25 +215,20 @@ def manager_cleanup() -> None:
 def manager_thread() -> None:
   cloudlog.bind(daemon="manager")
   cloudlog.info("manager start")
-  # 优化环境变量输出格式
-  env_info = {
-    "系统环境": {
-      "PATH": os.environ.get("PATH", ""),
-      "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
-      "BASEDIR": os.environ.get("BASEDIR", "")
-    },
-    "设备信息": {
-      "DONGLE_ID": os.environ.get("DONGLE_ID", ""),
-      "DEVICE": os.environ.get("DEVICE", "")
-    },
-    "版本信息": {
-      "GIT_ORIGIN": os.environ.get("GIT_ORIGIN", ""),
-      "GIT_BRANCH": os.environ.get("GIT_BRANCH", ""),
-      "GIT_COMMIT": os.environ.get("GIT_COMMIT", ""),
-      "CLEAN": os.environ.get("CLEAN", "0")
-    }
-  }
-  cloudlog.info(env_info)
+  # 系统环境信息
+  cloudlog.info(f"系统环境 PATH: {os.environ.get('PATH', '')}")
+  cloudlog.info(f"系统环境 PYTHONPATH: {os.environ.get('PYTHONPATH', '')}")
+  cloudlog.info(f"系统环境 BASEDIR: {os.environ.get('BASEDIR', '')}")
+
+  # 设备信息
+  cloudlog.info(f"设备信息 DONGLE_ID: {os.environ.get('DONGLE_ID', '')}")
+  cloudlog.info(f"设备信息 DEVICE: {os.environ.get('DEVICE', '')}")
+
+  # 版本信息
+  cloudlog.info(f"版本信息 GIT_ORIGIN: {os.environ.get('GIT_ORIGIN', '')}")
+  cloudlog.info(f"版本信息 GIT_BRANCH: {os.environ.get('GIT_BRANCH', '')}")
+  cloudlog.info(f"版本信息 GIT_COMMIT: {os.environ.get('GIT_COMMIT', '')}")
+  cloudlog.info(f"版本信息 CLEAN: {os.environ.get('CLEAN', '0')}")
 
   params = Params()
 
@@ -267,6 +262,10 @@ def manager_thread() -> None:
 
   if not params.get_bool("dp_upload_on"):
     ignore += ["uploader"]
+
+  # 如果禁用更新，则不启动updated进程
+  if params.get_bool("DisableUpdates"):
+    ignore += ["updated"]
 
   #add by nana
   ignore += ["manage_athenad"]
@@ -339,8 +338,17 @@ def manager_thread() -> None:
 
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)
-    print(running)
-    cloudlog.debug(running)
+                       
+    last_print_time = 0
+    PRINT_INTERVAL = 5  # 每5秒打印一次
+    
+    # 添加时间间隔检查
+    current_time = time.time()
+    if current_time - last_print_time >= PRINT_INTERVAL:
+        print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {running}")
+        last_print_time = current_time
+        
+    #cloudlog.debug(running)
 
     # send managerState
     msg = messaging.new_message('managerState')

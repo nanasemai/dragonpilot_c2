@@ -70,7 +70,7 @@ def save_exception(exc_text):
       print("无法创建备用崩溃日志目录")
       return None
 
-  timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+  timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
   # 使用更规范的文件命名方式，包含更多信息
   log_file = os.path.join(CRASHES_DIR, f'crash_{HARDWARE.get_device_type()}_{timestamp}.log')
   

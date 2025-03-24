@@ -6,7 +6,6 @@ from pathlib import Path
 from openpilot.common.swaglog import cloudlog
 
 DASHCAM_VIDEOS_PATH = '/data/media/0/dashcam/'
-#DASHCAM_LOGS_PATH = '/data/media/0/c2_logs/dashcam_logs/'
 
 # 视频质量预设
 QUALITY_PRESETS = {
@@ -40,11 +39,6 @@ class Dashcamd:
     self.session_id = int(time.monotonic() * 1000)
     self.file_counter = 0
 
-    # 设置模块名称
-    cloudlog.bind_global(module='dashcamd')
-
-    # 确保日志和视频目录存在
-    #Path(DASHCAM_LOGS_PATH).mkdir(parents=True, exist_ok=True)
     Path(DASHCAM_VIDEOS_PATH).mkdir(parents=True, exist_ok=True)
 
     # 添加会话信息到日志上下文
