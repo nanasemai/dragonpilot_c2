@@ -496,14 +496,16 @@ class Controls:
         self.events.add(EventName.commIssue)
       current_time = time.strftime('%Y-%m-%d %H:%M:%S')
       logs = {
-        'timestamp': current_time,
-        'invalid': [s for s, valid in self.sm.valid.items() if not valid],
-        'not_alive': [s for s, alive in self.sm.alive.items() if not alive],
-        'not_freq_ok': [s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok],
+        'event': 'commIssue',
+        'error': True,
+        'invalid': ', '.join([s for s, valid in self.sm.valid.items() if not valid]) or 'none',
+        'not_alive': ', '.join([s for s, alive in self.sm.alive.items() if not alive]) or 'none',
+        'not_freq_ok': ', '.join([s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok]) or 'none',
         'can_rcv_timeout': can_rcv_timeout,
+        'module': 'controlsd'
       }
       if logs != self.logged_comm_issue:
-        cloudlog.event("commIssue", error=True, **logs)
+        cloudlog.event(**logs)
         self.logged_comm_issue = logs
     else:
       self.logged_comm_issue = None

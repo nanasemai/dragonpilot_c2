@@ -38,16 +38,15 @@
 ■ 线程安全 ■ 异常处理
 ■ 日志压缩 ■ 远程日志支持
 """
-
 #!/usr/bin/env python3
 import os
 import zmq
 import json
 import time
+import datetime
 import logging
 from typing import NoReturn
 from pathlib import Path
-
 import cereal.messaging as messaging
 from openpilot.common.logging_extra import (
     SwagFormatter, SwaglogRotatingFileHandler,SwagLogger
@@ -86,7 +85,7 @@ def create_log_handler(boot_ts: float):
                 # 确保文件已打开
                 if self.stream is None and not self.delay:
                     self.stream = self._open()
-                
+
                 # 格式化日志并添加换行符
                 msg = self.format(record)
                 if msg:  # 只有非空消息才写入
@@ -203,27 +202,32 @@ class FilteredLogFormatter(logging.Formatter):
 
     def format(self, record):
         try:
-            # 添加调试信息
-            debug_info = f"Module: {record.module}, Level: {record.levelno}, MsgLen: {len(str(record.msg))}"
-            
-            # 快速路径：已格式化的消息
-            if isinstance(record.msg, str) and '|' in record.msg:
-                return record.msg
+            # 处理字典类型的日志消息
+            if isinstance(record.msg, dict):
+                log_dict = record.msg
+                # 提取事件信息和额外参数
+                event_msg = log_dict.get('event', 'unknown_event')
+                params = {k: v for k, v in log_dict.items() if k not in {'event', 'msg', 'module', 'timestamp'}}
+                
+                # 构建消息内容
+                param_str = ', '.join([f"{k}={v}" for k, v in params.items()])
+                msg_content = f"{event_msg} | {param_str}"
+                original_length = len(str(log_dict))  # 保持原始长度用于过滤
+            else:
+                # 原有处理逻辑
+                msg_content = str(record.msg)
+                original_length = len(msg_content)
 
-            # 直接使用消息内容，无需额外处理
-            msg_content = str(record.msg)
-
-            # 过滤检查
-            should_log = self._should_log(record.module, record.levelno, len(msg_content))
-            if not should_log:
-                # 更新过滤计数
+            # 过滤检查应使用原始长度
+            if not self._should_log(record.module, record.levelno, original_length):
                 self.filtered_count += 1
-                return ""  # 返回空字符串而不是None
+                return ""
 
-            # 简化时间戳获取
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            # 获取时间戳和日志级别
+            # 修复时区处理
+            timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
             level_name = logging.getLevelName(record.levelno)
-
+            
             return f"{timestamp} | {level_name:<7} | {record.module:<15} | {msg_content}"
         except Exception as e:
             return f"FormatError: {str(e)[:100]}"
@@ -231,19 +235,19 @@ class FilteredLogFormatter(logging.Formatter):
     def _should_log(self, module: str, log_level: int, message_size: int) -> bool:
         """判断是否应该记录日志"""
         module_lower = module.lower()
-        
+
         # 1. 检查关键模块
         if module_lower in self.critical_modules:
             return True
-            
+
         # 2. 检查全局日志级别
         if log_level < self.global_level:
             return False
-            
+
         # 3. 检查消息大小
         if message_size > 2*1024*1024:
             return log_level >= logging.ERROR
-            
+
         # 4. 检查减少日志模块的级别
         min_level = self.reduced_modules.get(module_lower, logging.DEBUG)
         return log_level >= min_level
@@ -261,19 +265,19 @@ def main() -> NoReturn:
         BOOT_TIMESTAMP = get_system_boottime()
         Path(DEFAULT_LOG_DIR).mkdir(parents=True, exist_ok=True)
         clean_old_logs()
-        
+
         # 初始化日志处理器
         if not (handler := create_log_handler(BOOT_TIMESTAMP)):
             print("无法创建日志处理器")
             return
-        
+
         # 确保只添加一个处理器
         logger = logging.getLogger()
         logger.handlers.clear()  # 清除所有现有处理器
         logger.propagate = False  # 防止日志传播到父logger
         handler.setFormatter(FilteredLogFormatter(None))
         logger.addHandler(handler)
-        
+
         # 测试日志
         test_record = logging.LogRecord(
             name='logmessaged',
@@ -310,8 +314,26 @@ def main() -> NoReturn:
                         module = raw_data.get('module', 'unknown').strip() or 'unknown'
                     else:  # 文本格式
                         level = min(max(int(dat[0]), logging.DEBUG), logging.CRITICAL)
-                        msg = dat[1:].decode('utf-8', errors='replace')
-                        module = 'text_log'
+                        raw_msg = dat[1:].decode('utf-8', errors='replace')
+
+                        # 尝试解析文本中的JSON结构
+                        try:
+                            msg_dict = json.loads(raw_msg)
+                            # 优先使用daemon字段作为模块名
+                            module = msg_dict.get('daemon') or \
+                                   msg_dict.get('filename', 'text_log').split('/')[-1].split('.')[0]
+                            module = module.lower().strip()  # 统一命名规范
+                            # 提取消息内容（优先使用msg字段）
+                            msg = msg_dict.get('msg', raw_msg)
+                            # 使用日志中的时间戳（如果存在）
+                            #timestamp = datetime.datetime.fromtimestamp(msg_dict.get('created', time.time()),tz=datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                        except Exception:
+                            # 非结构化文本处理
+                            module = 'text_log'
+                            msg = raw_msg
+                            #timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                        # 构建统一日志格式
+                        #formatted_msg = f"{timestamp} | {logging.getLevelName(level):<7} | {module:<15} | {msg}"
 
                     # 日志过滤检查
                     if not handler.formatter._should_log(module, level, len(str(msg))):
