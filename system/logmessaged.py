@@ -49,96 +49,33 @@ from typing import NoReturn
 from pathlib import Path
 import cereal.messaging as messaging
 from openpilot.common.logging_extra import (
-    SwagFormatter, SwaglogRotatingFileHandler,SwagLogger
+    SwagFormatter, SwaglogRotatingFileHandler,SwagLogger,CustomSwaglogRotatingFileHandler
 )
 from openpilot.common.params import Params
 
 # 全局配置常量
 DEFAULT_LOG_DIR = "/data/media/0/c2_logs/logmessage/"
-MAX_LOG_SIZE = 128 * 1024  # 128KB
-BACKUP_COUNT = 1500
-MAX_LOG_AGE = 4 * 24 * 3600  # 日志最大保留时间（4天）
-LOG_ROLLOVER_INTERVAL = 60  # 修改：日志滚动时间间隔（5分钟）
+# 日志滚动配置
+LOG_CONFIG = {
+    'INTERVAL': 300,        # 滚动时间间隔（秒）
+    'MAX_BYTES': 128*1024, # 单个日志文件大小限制（128KB）
+    'BACKUP_COUNT': 1500,  # 最大保留日志文件数量
+    'MAX_AGE': 4*24*3600, # 日志最大保留时间（4天）
+    'ENCODING': 'utf8',     # 日志文件编码
+    'CLEAN_INTERVAL': 6*3600  # 清理检查间隔（6小时）
+}
 
 def create_log_handler(boot_ts: float):
     try:
         hex_ts = hex(int(boot_ts))[2:]
-
-        # 确保日志目录存在
         os.makedirs(DEFAULT_LOG_DIR, exist_ok=True)
-
-        class CustomSwaglogRotatingFileHandler(SwaglogRotatingFileHandler):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self.process_count = 0  # 添加计数器
-                self.last_rollover_time = time.time()
-                base_name = os.path.basename(args[0])
-                parts = base_name.split('.')
-                self.base_name = parts[0]  # swaglog
-                self.hex_ts = parts[1]     # 67e0071a
-                self.rollover_count = 0
-                # 确保文件立即打开
-                if not self.delay:
-                    self.stream = self._open()
-
-            def emit(self, record):
-                # 确保文件已打开
-                if self.stream is None and not self.delay:
-                    self.stream = self._open()
-
-                # 格式化日志并添加换行符
-                msg = self.format(record)
-                if msg:  # 只有非空消息才写入
-                    self.stream.write(msg + '\n')
-                    self.stream.flush()
-                self.process_count += 1
-
-            def doRollover(self):
-                """执行日志滚动"""
-                if self.stream:
-                    self.stream.close()
-                    self.stream = None
-
-                # 生成新的文件名
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                new_name = os.path.join(
-                    os.path.dirname(self.baseFilename),
-                    f"{self.base_name}.{self.hex_ts}.{timestamp}.{self.rollover_count:03d}.log"
-                )
-
-                # 如果文件已存在，增加计数
-                while os.path.exists(new_name) and self.rollover_count < 1000:
-                    self.rollover_count += 1
-                    new_name = os.path.join(
-                        os.path.dirname(self.baseFilename),
-                        f"{self.base_name}.{self.hex_ts}.{timestamp}.{self.rollover_count:03d}.log"
-                    )
-
-                if self.rollover_count >= 1000:
-                    raise RuntimeError("Rollover count exceeded maximum limit")
-
-                self.baseFilename = new_name
-                self.rollover_count += 1
-                self.last_rollover_time = time.time()
-
-                if not self.delay:
-                    self.stream = self._open()
-
-            def shouldRollover(self, record):
-                """检查是否需要滚动日志"""
-                if super().shouldRollover(record):
-                    return True
-
-                current_time = time.time()
-                if current_time - self.last_rollover_time > LOG_ROLLOVER_INTERVAL:
-                    return True
-                return False
-
+        
         return CustomSwaglogRotatingFileHandler(
-            os.path.join(DEFAULT_LOG_DIR,
-                       f"swaglog.{hex_ts}.{time.strftime('%Y%m%d_%H%M%S')}.000.log"),
-            max_bytes=MAX_LOG_SIZE,
-            backup_count=BACKUP_COUNT
+            os.path.join(DEFAULT_LOG_DIR, f"swaglog.{hex_ts}.{time.strftime('%Y%m%d_%H%M%S')}.000.log"),
+            interval=LOG_CONFIG['INTERVAL'],
+            max_bytes=LOG_CONFIG['MAX_BYTES'],
+            backup_count=LOG_CONFIG['BACKUP_COUNT'],
+            encoding=LOG_CONFIG['ENCODING']
         )
     except Exception as e:
         print(f"HandlerInitError: {str(e)}")
@@ -149,7 +86,7 @@ def clean_old_logs():
     try:
         current_time = time.time()
         for log_file in Path(DEFAULT_LOG_DIR).glob("*.log"):
-            if current_time - log_file.stat().st_mtime > MAX_LOG_AGE:
+            if current_time - log_file.stat().st_mtime > LOG_CONFIG['MAX_AGE']:
                 log_file.unlink()
     except Exception as e:
         print(f"CleanLogError: {str(e)}")
@@ -204,15 +141,18 @@ class FilteredLogFormatter(logging.Formatter):
         try:
             # 处理字典类型的日志消息
             if isinstance(record.msg, dict):
-                log_dict = record.msg
+                log_dict = record.msg.copy()  # 使用副本避免修改原始数据
                 # 提取事件信息和额外参数
                 event_msg = log_dict.get('event', 'unknown_event')
+                # 移除已知的特殊字段
+                for field in ['msg', 'module', 'timestamp']:
+                    log_dict.pop(field, None)
                 params = {k: v for k, v in log_dict.items() if k not in {'event', 'msg', 'module', 'timestamp'}}
                 
                 # 构建消息内容
                 param_str = ', '.join([f"{k}={v}" for k, v in params.items()])
                 msg_content = f"{event_msg} | {param_str}"
-                original_length = len(str(log_dict))  # 保持原始长度用于过滤
+                original_length = len(str(record.msg))  # 保持原始长度用于过滤
             else:
                 # 原有处理逻辑
                 msg_content = str(record.msg)
@@ -224,8 +164,9 @@ class FilteredLogFormatter(logging.Formatter):
                 return ""
 
             # 获取时间戳和日志级别
-            # 修复时区处理
-            timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            current_time = time.localtime()
+            microsecond = int(time.time() * 1000) % 1000
+            timestamp = f"{time.strftime('%Y-%m-%d %H:%M:%S', current_time)}.{microsecond:03d}"
             level_name = logging.getLevelName(record.levelno)
             
             return f"{timestamp} | {level_name:<7} | {record.module:<15} | {msg_content}"
@@ -234,6 +175,8 @@ class FilteredLogFormatter(logging.Formatter):
 
     def _should_log(self, module: str, log_level: int, message_size: int) -> bool:
         """判断是否应该记录日志"""
+        if module is None:
+            module = "unknown"
         module_lower = module.lower()
 
         # 1. 检查关键模块
@@ -253,6 +196,32 @@ class FilteredLogFormatter(logging.Formatter):
         return log_level >= min_level
 
 def main() -> NoReturn:
+    import signal
+    import atexit
+
+    def cleanup():
+        """清理资源"""
+        try:
+            if 'sock' in globals() and sock is not None:
+                sock.close()
+            if 'ctx' in globals() and ctx is not None:
+                ctx.term()
+            if 'handler' in globals() and handler is not None:
+                handler.close()
+        except Exception as e:
+            print(f"清理错误: {str(e)}")
+
+    def signal_handler(signum, frame):
+        """处理退出信号"""
+        print(f"收到信号 {signum}，正在退出...")
+        cleanup()
+        os._exit(0)
+
+    # 注册清理函数
+    atexit.register(cleanup)
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     try:
         # 初始化
         ctx = zmq.Context()
@@ -269,10 +238,14 @@ def main() -> NoReturn:
         # 初始化日志处理器
         if not (handler := create_log_handler(BOOT_TIMESTAMP)):
             print("无法创建日志处理器")
+            # 清理资源
+            sock.close()
+            ctx.term()
             return
 
         # 确保只添加一个处理器
         logger = logging.getLogger()
+        logger.setLevel(logging.DEBUG)  # 添加这行，确保可以处理所有级别的日志
         logger.handlers.clear()  # 清除所有现有处理器
         logger.propagate = False  # 防止日志传播到父logger
         handler.setFormatter(FilteredLogFormatter(None))
@@ -295,7 +268,7 @@ def main() -> NoReturn:
 
         while True:
             # 定期清理旧日志
-            if time.time() - last_clean_time > 6 * 3600:
+            if time.time() - last_clean_time > LOG_CONFIG['CLEAN_INTERVAL']:
                 clean_old_logs()
                 last_clean_time = time.time()
 
@@ -326,12 +299,16 @@ def main() -> NoReturn:
                             # 提取消息内容（优先使用msg字段）
                             msg = msg_dict.get('msg', raw_msg)
                             # 使用日志中的时间戳（如果存在）
-                            #timestamp = datetime.datetime.fromtimestamp(msg_dict.get('created', time.time()),tz=datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                            current_time = time.localtime()
+                            microsecond = int(time.time() * 1000) % 1000
+                            timestamp = f"{time.strftime('%Y-%m-%d %H:%M:%S', current_time)}.{microsecond:03d}"
                         except Exception:
                             # 非结构化文本处理
                             module = 'text_log'
                             msg = raw_msg
-                            #timestamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                            current_time = time.localtime()
+                            microsecond = int(time.time() * 1000) % 1000
+                            timestamp = f"{time.strftime('%Y-%m-%d %H:%M:%S', current_time)}.{microsecond:03d}"
                         # 构建统一日志格式
                         #formatted_msg = f"{timestamp} | {logging.getLevelName(level):<7} | {module:<15} | {msg}"
 

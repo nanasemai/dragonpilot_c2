@@ -141,7 +141,9 @@ class SwagFormatter(logging.Formatter):
             record.raw_msg = msg
             
             # 简化时间戳格式化
-            timestamp = datetime.datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S")
+            current_time = time.localtime()
+            microsecond = int(time.time() * 1000) % 1000
+            timestamp = f"{time.strftime('%Y-%m-%d %H:%M:%S', current_time)}.{microsecond:03d}"
             level_name = logging.getLevelName(record.levelno)
             module = getattr(record, 'module', 'unknown')
             return f"{timestamp} | {level_name} | {module} | {msg_content}"
@@ -150,37 +152,142 @@ class SwagFormatter(logging.Formatter):
 
 
 class SwaglogRotatingFileHandler(RotatingFileHandler):
-    """增强型滚动日志处理器"""
-    def __init__(self, filename, max_bytes=0, backup_count=0):
+    def __init__(self, filename, max_bytes=0, backup_count=0, interval=None, encoding='utf8', startup_time=None):
         super().__init__(
             filename,
             mode='a',
             maxBytes=max_bytes,
             backupCount=backup_count,
-            encoding='utf8',
-            delay=False
+            encoding=encoding,
+            delay=True
         )
+        self.interval = interval
+        self.last_rollover = time.time()
+        self.process_count = 0
+        self.startup_time = startup_time or time.strftime("%Y%m%d_%H%M%S")
         
+        # 解析基础文件名
+        base_name = os.path.basename(filename)
+        parts = base_name.split('.')
+        self.base_name = parts[0]
+        self.hex_ts = parts[1] if len(parts) > 1 else ''
+        self.rollover_count = 0
+
+    def get_next_filename(self):
+        """生成下一个日志文件名"""
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        return os.path.join(
+            os.path.dirname(self.baseFilename),
+            f"{self.base_name}.{self.hex_ts}.{timestamp}.{self.rollover_count:03d}.log"
+        )
+
+    def rotation_filename(self, default_name):
+        """重写文件名生成方法"""
+        return self.get_next_filename()
+
     def doRollover(self):
-        """自定义滚动策略"""
+        """执行日志滚动"""
         if self.stream:
             self.stream.close()
             self.stream = None
-        if self.backupCount > 0:
-            for i in range(self.backupCount - 1, 0, -1):
-                sfn = self.rotation_filename(f"{self.baseFilename}.{i:03d}")
-                dfn = self.rotation_filename(f"{self.baseFilename}.{(i + 1):03d}")
-                if os.path.exists(sfn):
-                    if os.path.exists(dfn):
-                        os.remove(dfn)
-                    os.rename(sfn, dfn)
-            dfn = self.rotation_filename(f"{self.baseFilename}.001")
-            if os.path.exists(dfn):
-                os.remove(dfn)
-            os.rename(self.baseFilename, dfn)
+
+        next_name = self.get_next_filename()
+        while os.path.exists(next_name) and self.rollover_count < 1000:
+            self.rollover_count += 1
+            next_name = self.get_next_filename()
+
+        if self.rollover_count >= 1000:
+            raise RuntimeError("Rollover count exceeded maximum limit")
+
+        self.baseFilename = next_name
+        self.rollover_count += 1
+        self.last_rollover = time.time()
         self.stream = self._open()
 
 
+class CustomSwaglogRotatingFileHandler(SwaglogRotatingFileHandler):
+    def __init__(self, filename, max_bytes=0, backup_count=0, interval=None, encoding='utf8'):
+        super().__init__(filename, max_bytes, backup_count, interval, encoding)
+        self.process_count = 0
+        base_name = os.path.basename(filename)
+        parts = base_name.split('.')
+        self.base_name = parts[0]
+        self.hex_ts = parts[1] if len(parts) > 1 else hex(int(time.time()))[2:]
+        self.rollover_count = 0
+        self.current_size = 0
+        self.has_content = False
+        self._pending_file = None
+        self.stream = None  # 初始化时不创建文件
+
+    def _get_next_filename(self):
+        """生成下一个日志文件名"""
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        next_filename = os.path.join(
+            os.path.dirname(self.baseFilename),
+            f"{self.base_name}.{self.hex_ts}.{timestamp}.{self.rollover_count:03d}.log"
+        )
+        
+        while os.path.exists(next_filename) and self.rollover_count < 1000:
+            self.rollover_count += 1
+            next_filename = os.path.join(
+                os.path.dirname(self.baseFilename),
+                f"{self.base_name}.{self.hex_ts}.{timestamp}.{self.rollover_count:03d}.log"
+            )
+
+        if self.rollover_count >= 1000:
+            raise RuntimeError("Rollover count exceeded maximum limit")
+            
+        return next_filename
+
+    def shouldRollover(self, record):
+        """检查是否应该滚动日志文件"""
+        if not self.has_content:
+            return False
+            
+        if self.stream is None:  # 如果文件未创建，不需要滚动
+            return False
+            
+        size_exceeded = self.maxBytes > 0 and self.current_size >= self.maxBytes
+        time_exceeded = self.interval and time.time() - self.last_rollover >= self.interval
+        return size_exceeded or time_exceeded    
+
+    def emit(self, record):
+        """确保只写入有效内容"""
+        if record and record.msg:
+            msg = self.format(record)
+            if msg:
+                try:
+                    # 第一次写入时才创建文件
+                    if self.stream is None:
+                        self._pending_file = self._get_next_filename()
+                        self.stream = open(self._pending_file, self.mode, encoding=self.encoding)
+                        self.baseFilename = self._pending_file
+                        self.last_rollover = time.time()
+                    
+                    self.stream.write(msg + '\n')
+                    self.stream.flush()
+                    self.current_size += len(msg) + 1
+                    self.has_content = True
+                    self.process_count += 1
+
+                    # 使用 shouldRollover 判断是否需要滚动
+                    if self.shouldRollover(record):
+                        self.doRollover()
+                except Exception as e:
+                    self.handleError(record)
+
+    def doRollover(self):
+        if not self.has_content:  # 如果当前文件没有内容，不执行滚动
+            return
+            
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+
+        self._pending_file = self._get_next_filename()
+        self.rollover_count += 1
+        self.current_size = 0
+        self.has_content = False
 
 def json_robust_dumps(obj):
     """增强型JSON序列化"""

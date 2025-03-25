@@ -64,13 +64,33 @@ import warnings
 import zmq
 from pathlib import Path
 from openpilot.common.logging_extra import (
-    SwagLogger, SwagFormatter, json_robust_dumps
+    SwagLogger, SwagFormatter, json_robust_dumps,CustomSwaglogRotatingFileHandler
 )
 from openpilot.common.params import Params
 
 MEDIA_PATH = "/data/media/0/c2_logs/swaglog"
 DEFAULT_PATH = "/data/log/"
 SWAGLOG_DIR = MEDIA_PATH if os.path.exists("/data/media/0") else DEFAULT_PATH
+
+# 日志滚动配置
+LOG_CONFIG = {
+    'INTERVAL': 60,
+    'MAX_BYTES': 1024 * 128,
+    'BACKUP_COUNT': 2500,
+    'ENCODING': 'utf8',
+    'MAX_AGE': 4 * 24 * 3600,  # 4天
+    'CLEAN_INTERVAL': 6 * 3600  # 6小时清理一次
+}
+
+def clean_old_logs():
+    """清理过期日志文件"""
+    try:
+        current_time = time.time()
+        for log_file in Path(SWAGLOG_DIR).glob("*.log"):
+            if current_time - log_file.stat().st_mtime > LOG_CONFIG['MAX_AGE']:
+                log_file.unlink()
+    except Exception as e:
+        print(f"CleanLogError: {str(e)}")
 
 def formatted_print(level, module, message):
     """使用统一格式打印消息"""
@@ -86,6 +106,7 @@ class UnixDomainSocketHandler(logging.Handler):
         self.pid = None
         self.zctx = None
         self.sock = None
+        self.swaglogger = getattr(formatter, 'swaglogger', None)  # 添加这行
 
     def __del__(self):
         if self.sock is not None:
@@ -101,8 +122,8 @@ class UnixDomainSocketHandler(logging.Handler):
         self.pid = os.getpid()
 
     def emit(self, record):
-        # 检查进程ID是否变化，如果变化则重新连接
-        if os.getpid() != self.pid:
+        # 检查进程ID是否变化或未初始化，如果是则重新连接
+        if self.pid is None or os.getpid() != self.pid:
             warnings.filterwarnings("ignore", category=ResourceWarning, message="unclosed.*<zmq.*>")
             try:
                 self.connect()
@@ -130,7 +151,7 @@ class UnixDomainSocketHandler(logging.Handler):
                 'level': record.levelno,
                 'msg': msg_content,  # 使用去除颜色代码后的消息
                 'module': module,
-                'timestamp': time.time()
+                'timestamp': time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())  # 使用本地时间
             }
 
             # 编码并发送消息
@@ -170,56 +191,56 @@ class UnixDomainSocketHandler(logging.Handler):
         except Exception as e:
             return f"FormatterError: {str(e)}"
 
-class SwaglogRotatingFileHandler(logging.handlers.BaseRotatingHandler):
-    """滚动日志文件处理器，支持大小和时间触发滚动"""
-    def __init__(self, base_filename, interval=60, max_bytes=1024*256, backup_count=2500, encoding=None, startup_time=None):
-        super().__init__(base_filename, mode="a", encoding=encoding, delay=True)
-        self.base_filename = base_filename
-        self.interval = interval  # 秒
-        self.max_bytes = max_bytes
-        self.backup_count = backup_count
-        # 保存启动时间，如果未提供则使用当前时间
-        self.startup_time = startup_time or time.strftime("%Y%m%d_%H%M%S")
-        self.log_files = self.get_existing_logfiles()
-        log_indexes = [f.split(".")[-1] for f in self.log_files]
-        self.last_file_idx = max([int(i) for i in log_indexes if i.isdigit()] or [-1])
-        self.last_rollover = None
-        self.doRollover()
+# class SwaglogRotatingFileHandler(logging.handlers.BaseRotatingHandler):
+#     """滚动日志文件处理器，支持大小和时间触发滚动"""
+#     def __init__(self, base_filename, interval=60, max_bytes=1024*256, backup_count=2500, encoding=None, startup_time=None):
+#         super().__init__(base_filename, mode="a", encoding=encoding, delay=True)
+#         self.base_filename = base_filename
+#         self.interval = interval  # 秒
+#         self.max_bytes = max_bytes
+#         self.backup_count = backup_count
+#         # 保存启动时间，如果未提供则使用当前时间
+#         self.startup_time = startup_time or time.strftime("%Y%m%d_%H%M%S")
+#         self.log_files = self.get_existing_logfiles()
+#         log_indexes = [f.split(".")[-1] for f in self.log_files]
+#         self.last_file_idx = max([int(i) for i in log_indexes if i.isdigit()] or [-1])
+#         self.last_rollover = None
+#         self.doRollover()
 
-    def _open(self):
-        self.last_rollover = time.monotonic()
-        self.last_file_idx += 1
-        # 在文件名中添加启动时间
-        next_filename = f"{self.base_filename}.{self.startup_time}.{self.last_file_idx:010}"
-        stream = open(next_filename, self.mode, encoding=self.encoding)
-        self.log_files.insert(0, next_filename)
-        return stream
+#     def _open(self):
+#         self.last_rollover =  time.time()
+#         self.last_file_idx += 1
+#         # 在文件名中添加启动时间
+#         next_filename = f"{self.base_filename}.{self.startup_time}.{self.last_file_idx:010}"
+#         stream = open(next_filename, self.mode, encoding=self.encoding)
+#         self.log_files.insert(0, next_filename)
+#         return stream
 
-    def get_existing_logfiles(self):
-        log_files = list()
-        base_dir = os.path.dirname(self.base_filename)
-        # 修改文件匹配逻辑，考虑启动时间
-        for fn in os.listdir(base_dir):
-            fp = os.path.join(base_dir, fn)
-            if fp.startswith(self.base_filename) and os.path.isfile(fp):
-                log_files.append(fp)
-        return sorted(log_files)
+#     def get_existing_logfiles(self):
+#         log_files = list()
+#         base_dir = os.path.dirname(self.base_filename)
+#         # 修改文件匹配逻辑，考虑启动时间
+#         for fn in os.listdir(base_dir):
+#             fp = os.path.join(base_dir, fn)
+#             if fp.startswith(self.base_filename) and os.path.isfile(fp):
+#                 log_files.append(fp)
+#         return sorted(log_files)
 
-    def shouldRollover(self, record):
-        size_exceeded = self.max_bytes > 0 and self.stream.tell() >= self.max_bytes
-        time_exceeded = self.interval > 0 and self.last_rollover + self.interval <= time.monotonic()
-        return size_exceeded or time_exceeded
+#     def shouldRollover(self, record):
+#         size_exceeded = self.max_bytes > 0 and self.stream.tell() >= self.max_bytes
+#         time_exceeded = self.interval > 0 and time.time() - self.last_rollover >= self.interval
+#         return size_exceeded or time_exceeded
 
-    def doRollover(self):
-        if self.stream:
-            self.stream.close()
-        self.stream = self._open()
+#     def doRollover(self):
+#         if self.stream:
+#             self.stream.close()
+#         self.stream = self._open()
 
-        if self.backup_count > 0:
-            while len(self.log_files) > self.backup_count:
-                to_delete = self.log_files.pop()
-                if os.path.exists(to_delete):  # 安全检查
-                    os.remove(to_delete)
+#         if self.backup_count > 0:
+#             while len(self.log_files) > self.backup_count:
+#                 to_delete = self.log_files.pop()
+#                 if os.path.exists(to_delete):  # 安全检查
+#                     os.remove(to_delete)
 
 class AnsiColorStripFormatter(logging.Formatter):
     """去除ANSI颜色代码的格式化器"""
@@ -239,9 +260,15 @@ def get_file_handler():
     """获取文件日志处理器"""
     Path(SWAGLOG_DIR).mkdir(parents=True, exist_ok=True)
     base_filename = os.path.join(SWAGLOG_DIR, "swaglog")
-    # 获取当前启动时间
     startup_time = time.strftime("%Y%m%d_%H%M%S")
-    handler = SwaglogRotatingFileHandler(base_filename, startup_time=startup_time)
+    
+    handler = CustomSwaglogRotatingFileHandler(  # 改用 CustomSwaglogRotatingFileHandler
+        base_filename,
+        interval=LOG_CONFIG['INTERVAL'],
+        max_bytes=LOG_CONFIG['MAX_BYTES'],
+        backup_count=LOG_CONFIG['BACKUP_COUNT'],
+        encoding=LOG_CONFIG['ENCODING']
+    )
     return handler
 
 def add_file_handler(log):
@@ -313,6 +340,7 @@ class SwagLogManager:
         }.get(print_level, logging.WARNING)
 
     def _setup_handlers(self):
+        clean_old_logs()  # 启动时清理
         """设置日志处理器"""
         # 清除所有现有处理器
         self.logger.handlers.clear()
@@ -350,7 +378,7 @@ class SwagLogManager:
                 'level': logging.INFO,
                 'msg': 'Testing logmessaged connection',  # 直接使用字符串作为消息内容
                 'module': 'swaglog',
-                'timestamp': time.time()
+                'timestamp': time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())  # 使用本地时间
             }
             payload = b'\x01' + json_robust_dumps(test_data).encode('utf-8')
             test_sock.send(payload, zmq.NOBLOCK)
