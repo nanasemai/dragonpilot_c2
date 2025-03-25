@@ -496,6 +496,7 @@ class Controls:
         self.events.add(EventName.commIssue)
       current_time = time.strftime('%Y-%m-%d %H:%M:%S')
       logs = {
+        'name': 'commIssue', 
         'event': 'commIssue',
         'error': True,
         'invalid': ', '.join([s for s, valid in self.sm.valid.items() if not valid]) or 'none',
