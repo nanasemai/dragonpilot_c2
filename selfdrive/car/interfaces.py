@@ -531,8 +531,7 @@ class CarInterfaceBase(ABC):
                       " 驾驶员力矩:", cs_out.steeringTorque - cs_out.steeringTorqueEps,
                       " 总力矩:", cs_out.steeringTorque,
                       " 方向盘角度:", cs_out.steeringAngleDeg,
-                      " 方向盘转速:", abs(cs_out.steeringRateDeg),
-                      " 横向加速度:", cs_out.lateralAccel)
+                      " 方向盘转速:", abs(cs_out.steeringRateDeg))
       events.add(EventName.steerUnavailable)
 
     # we engage when pcm is active (rising edge)
