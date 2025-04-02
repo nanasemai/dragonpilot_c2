@@ -106,6 +106,21 @@ def videoscreenrecord(file):
 
 
 @app.route("/screenrecords/download/<clip>")
+def download_screenrecord(clip):
+    try:
+        full_path = os.path.abspath(os.path.join(fleet.SCREENRECORD_PATH, clip))
+        if not full_path.startswith(os.path.abspath(fleet.SCREENRECORD_PATH)):
+            return render_template("error.html", error="非法的路径访问")
+
+        if not os.path.isfile(full_path):
+            return render_template("error.html", error="文件不存在")
+
+        return send_from_directory(os.path.dirname(full_path), os.path.basename(full_path), as_attachment=True)
+    except Exception as e:
+        return render_template("error.html", error=f"下载文件出错: {str(e)}")
+
+
+# 保留原有的通用下载路由
 @app.route("/download/<path:file_type>/<path:file_path>")
 def download_any_file(file_type, file_path):
     try:
