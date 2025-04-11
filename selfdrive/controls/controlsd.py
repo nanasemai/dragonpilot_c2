@@ -15,7 +15,7 @@ from panda import ALTERNATIVE_EXPERIENCE
 from openpilot.system.version import is_release_branch, get_short_branch
 from openpilot.selfdrive.boardd.boardd import can_list_to_can_capnp
 from openpilot.selfdrive.car.car_helpers import get_car, get_startup_event, get_one_can
-from openpilot.selfdrive.controls.lib.lateral_planner import CAMERA_OFFSET
+#from openpilot.selfdrive.controls.lib.lateral_planner import CAMERA_OFFSET
 from openpilot.selfdrive.controls.lib.drive_helpers import VCruiseHelper, get_lag_adjusted_curvature,get_road_edge, CONTROL_N
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_CONTROL_SPEED
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
@@ -132,6 +132,8 @@ class Controls:
     self._dp_road_edge_timer = 0.0  # 添加计时器变量
     # 添加ALKA力矩检查开关
     self._dp_alka_torque_check = Params().get_bool("dp_alka_torque_check")
+    self.camera_offset = int(Params().get("dp_lateral_camera_offset", encoding="utf-8"))*0.01 #CAMERA_OFFSET
+
 
     self.sm = sm
     if self.sm is None:
@@ -151,7 +153,7 @@ class Controls:
       get_one_can(self.can_sock)
 
       num_pandas = len(messaging.recv_one_retry(self.sm.sock['pandaStates']).pandaStates)
-      experimental_long_allowed = self.params.get_bool("ExperimentalLongitudinalEnabled")# and not self.dp_0813 # and not is_release_branch()
+      experimental_long_allowed = not self.dp_0813 and self.params.get_bool("ExperimentalLongitudinalEnabled") # and not is_release_branch()
       self.CI, self.CP = get_car(self.can_sock, self.pm.sock['sendcan'], experimental_long_allowed, num_pandas)
     else:
       self.CI, self.CP = CI, CI.CP
@@ -496,7 +498,7 @@ class Controls:
         self.events.add(EventName.commIssue)
       current_time = time.strftime('%Y-%m-%d %H:%M:%S')
       logs = {
-        'name': 'commIssue', 
+        'name': 'commIssue',
         'event': 'commIssue',
         'error': True,
         'invalid': ', '.join([s for s, valid in self.sm.valid.items() if not valid]) or 'none',
@@ -941,8 +943,8 @@ class Controls:
       r_lane_change_prob = desire_prediction[Desire.laneChangeRight]
 
       lane_lines = model_v2.laneLines
-      l_lane_close = left_lane_visible and (lane_lines[1].y[0] > -(1.08 + CAMERA_OFFSET))
-      r_lane_close = right_lane_visible and (lane_lines[2].y[0] < (1.08 - CAMERA_OFFSET))
+      l_lane_close = left_lane_visible and (lane_lines[1].y[0] > -(1.08 + self.cam_offset))
+      r_lane_close = right_lane_visible and (lane_lines[2].y[0] < (1.08 - self.cam_offset))
 
       hudControl.leftLaneDepart = bool(l_lane_change_prob > LANE_DEPARTURE_THRESHOLD and l_lane_close)
       hudControl.rightLaneDepart = bool(r_lane_change_prob > LANE_DEPARTURE_THRESHOLD and r_lane_close)

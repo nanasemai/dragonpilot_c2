@@ -69,8 +69,7 @@ class Uploader():
     self.last_filename = ""
 
     self.immediate_folders = ["crash/", "boot/"]
-    # 只保留 qlog.bz2，移除视频文件上传
-    self.immediate_priority = {"qlog.bz2": 0}
+    self.immediate_priority = {"qlog.bz2": 0, "qcamera.ts": 1}
 
   def get_upload_sort(self, name):
     if name in self.immediate_priority:
@@ -95,10 +94,6 @@ class Uploader():
         continue
 
       for name in sorted(names, key=self.get_upload_sort):
-        # 跳过视频文件
-        if name.endswith('.ts'):
-          continue
-
         key = os.path.join(logname, name)
         fn = os.path.join(path, name)
         # skip files already uploaded

@@ -165,11 +165,16 @@ class LatControlTorque(LatControl):
     self._frame += 1
     if self._frame % 250 == 0:
       self._frame = 0
+      # 检查是否启用自定义转向参数
       self.torqued_override = self.param_s.get_bool("dp_torqued_override")
-      if not self.torqued_override:
-        return
-      self.torque_params.latAccelFactor = float(self.param_s.get("dp_torque_lat_accel_factor", encoding="utf8")) * 0.01 # 1~500 delvalue=250
-      self.torque_params.friction = float(self.param_s.get("dp_torque_friction", encoding="utf8")) * 0.01 #1~50 delvalue=1
+      if self.torqued_override:
+        # 只有在启用时才获取和更新这些参数
+        self.torque_params.latAccelFactor = float(self.param_s.get("dp_torque_lat_accel_factor", encoding="utf8")) * 0.01 # 1~500 delvalue=250
+        self.torque_params.friction = float(self.param_s.get("dp_torque_friction", encoding="utf8")) * 0.001 #1~800 delvalue=220
+        lateralTorqueKp = int(self.param_s.get("dp_lateral_torque_kp", encoding="utf-8")) * 0.01
+        lateralTorqueKi = int(self.param_s.get("dp_lateral_torque_ki", encoding="utf-8")) * 0.01
+        self.pid._k_p = [[0], [lateralTorqueKp]]
+        self.pid._k_i = [[0], [lateralTorqueKi]]
 
   def update(self, active, CS, VM, params, last_actuators, steer_limited, desired_curvature, desired_curvature_rate, llk, model_data=None):
     """更新控制器状态和计算控制输出

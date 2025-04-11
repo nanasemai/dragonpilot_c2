@@ -102,8 +102,8 @@ def manager_init() -> None:
     ("dp_dashcam_duration", "180"),    # 单个视频时长（秒）
     ("dp_dashcam_kept_hours", "15"),   # 视频保留时长（小时）
     ("dp_torqued_override", "0"),
-    ("dp_torque_lat_accel_factor", "250"),
-    ("dp_torque_friction", "1"),
+    ("dp_torque_lat_accel_factor", "140"),#1.4
+    ("dp_torque_friction", "220"),#0.22
     ("dp_gpxd", "0"),
     ("dp_fleet_fileserv", "0"),
     ("dp_dev_ui_info", "0"),
@@ -111,6 +111,11 @@ def manager_init() -> None:
     ("dp_device_display_off_mode", "0"),
     # 添加换道中止检查参数
     ("dp_lat_lane_change_abort_check", "0"),
+    ("dp_lateral_camera_offset", "-6"),#单位厘米
+    ("dp_lateral_path_offset", "0"),#单位厘米
+    ("dp_lateral_torque_kp", "100"),  # 1.0
+    ("dp_lateral_torque_ki", "10"),  # 0.1
+	("dp_lat_use_siglin", "0"),
   ]
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))
@@ -338,16 +343,16 @@ def manager_thread() -> None:
 
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)
-                       
+
     last_print_time = 0
     PRINT_INTERVAL = 5  # 每5秒打印一次
-    
+
     # 添加时间间隔检查
     current_time = time.time()
     if current_time - last_print_time >= PRINT_INTERVAL:
         print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {running}")
         last_print_time = current_time
-        
+
     #cloudlog.debug(running)
 
     # send managerState
@@ -368,9 +373,19 @@ def manager_thread() -> None:
     if shutdown:
       break
 
+
 def main() -> None:
+  prepare_only = os.getenv("PREPAREONLY") is not None
+
   manager_init()
-  if os.getenv("PREPAREONLY") is not None:
+
+  # Start UI early so prepare can happen in the background
+  if not prepare_only:
+    managed_processes['ui'].start()
+
+  manager_prepare()
+
+  if prepare_only:
     return
 
   # SystemExit on sigterm
@@ -394,6 +409,7 @@ def main() -> None:
   elif params.get_bool("DoShutdown"):
     cloudlog.warning("shutdown")
     HARDWARE.shutdown()
+
 
 def get_support_car_list():
   cars = dict({"cars": []})
