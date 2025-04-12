@@ -396,7 +396,6 @@ def main() -> None:
   # 初始化其他关键服务
   if not prepare_only:
     managed_processes['logmessaged'].prepare()
-    managed_processes['swaglogd'].prepare()
 
   manager_prepare()
 
