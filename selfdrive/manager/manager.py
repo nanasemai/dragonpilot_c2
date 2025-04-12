@@ -186,17 +186,13 @@ def manager_prepare() -> None:
   priority_processes = {
     # 第一优先级：硬件通信核心和UI
     'critical': ['boardd', 'pandad', 'logmessaged', 'ui'],
-    
     # 第二优先级：车辆控制和路径规划
     'high': ['controlsd', 'plannerd', 'radard', 'camerad'],
-    
     # 第三优先级：感知模型和定位
     'medium': ['modeld', 'locationd', 'paramsd', 'ubloxd', 'gpsd'],
-    
     # 第四优先级：监控和辅助服务
     'low': ['uploader', 'logcatd', 'proclogd', 'navd', 'dmonitoringd']
   }
-
   prepared = set()
   # 按优先级顺序准备进程
   for priority in ['critical', 'high', 'medium', 'low']:
@@ -393,24 +389,10 @@ def main() -> None:
     managed_processes['ui'].start()
     time.sleep(0.1)  # 确保UI稳定启动
 
-  # 初始化其他关键服务
-  if not prepare_only:
-    managed_processes['logmessaged'].prepare()
-
   manager_prepare()
 
   if prepare_only:
     return
-
-  # 延迟启动的低优先级服务
-  delayed_processes = ['uploader', 'logcatd', 'proclogd', 'navd', 'dmonitoringd']
-  for p in delayed_processes:
-    if p in managed_processes and p not in ignore:
-      try:
-        managed_processes[p].start()
-        time.sleep(0.02)  # 添加微小延迟避免资源竞争
-      except Exception as e:
-        cloudlog.error(f"Failed to start {p}: {str(e)}")
 
   # SystemExit on sigterm
   signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(1))
