@@ -115,7 +115,7 @@ def manager_init() -> None:
     ("dp_lateral_path_offset", "0"),#单位厘米
     ("dp_lateral_torque_kp", "100"),  # 1.0
     ("dp_lateral_torque_ki", "10"),  # 0.1
-	("dp_lat_use_siglin", "0"),
+	  ("dp_lat_use_siglin", "0"),
   ]
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))
@@ -182,23 +182,32 @@ def manager_init() -> None:
                        device=HARDWARE.get_device_type())
 
 def manager_prepare() -> None:
-  # 按优先级对进程排序
+  # 按功能关键程度对进程排序
   priority_processes = {
-    'critical': ['boardd', 'ubloxd', 'gpsd'],  # 系统关键进程
-    'high': ['controlsd', 'plannerd', 'radard'],  # 控制相关进程
-    'medium': ['modeld', 'locationd', 'paramsd'],  # 模型和定位进程
-    'low': ['uploader', 'logmessaged', 'logcatd']  # 日志和上传进程
+    # 第一优先级：硬件通信核心和UI
+    'critical': ['boardd', 'pandad', 'logmessaged', 'ui'],
+    
+    # 第二优先级：车辆控制和路径规划
+    'high': ['controlsd', 'plannerd', 'radard', 'camerad'],
+    
+    # 第三优先级：感知模型和定位
+    'medium': ['modeld', 'locationd', 'paramsd', 'ubloxd', 'gpsd'],
+    
+    # 第四优先级：监控和辅助服务
+    'low': ['uploader', 'logcatd', 'proclogd', 'navd', 'dmonitoringd']
   }
 
   prepared = set()
-  # 按优先级准备进程
+  # 按优先级顺序准备进程
   for priority in ['critical', 'high', 'medium', 'low']:
     for proc_name in priority_processes[priority]:
       if proc_name in managed_processes and proc_name not in prepared:
-        # 确保依赖进程已准备
         if ensure_dependencies(proc_name, prepared):
           managed_processes[proc_name].prepare()
           prepared.add(proc_name)
+          # 关键进程间添加短暂延迟
+          if priority in ['critical', 'high']:
+            time.sleep(0.05)
 
   # 准备其他未分类进程
   for p in managed_processes.values():
@@ -379,14 +388,30 @@ def main() -> None:
 
   manager_init()
 
-  # Start UI early so prepare can happen in the background
+  # 最先启动UI
   if not prepare_only:
     managed_processes['ui'].start()
+    time.sleep(0.1)  # 确保UI稳定启动
+
+  # 初始化其他关键服务
+  if not prepare_only:
+    managed_processes['logmessaged'].prepare()
+    managed_processes['swaglogd'].prepare()
 
   manager_prepare()
 
   if prepare_only:
     return
+
+  # 延迟启动的低优先级服务
+  delayed_processes = ['uploader', 'logcatd', 'proclogd', 'navd', 'dmonitoringd']
+  for p in delayed_processes:
+    if p in managed_processes and p not in ignore:
+      try:
+        managed_processes[p].start()
+        time.sleep(0.02)  # 添加微小延迟避免资源竞争
+      except Exception as e:
+        cloudlog.error(f"Failed to start {p}: {str(e)}")
 
   # SystemExit on sigterm
   signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(1))

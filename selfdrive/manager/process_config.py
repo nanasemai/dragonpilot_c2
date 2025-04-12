@@ -106,12 +106,16 @@ procs = [
 
 managed_processes = {p.name: p for p in procs}
 
-# 添加进程依赖关系
+# 更新进程依赖关系
 PROCESS_DEPENDENCIES = {
-  'controlsd': ['boardd', 'plannerd', 'radard'],
-  'plannerd': ['locationd'],
+  'controlsd': ['boardd', 'plannerd', 'radard', 'pandad'],
+  'plannerd': ['locationd', 'modeld'],
   'radard': ['modeld'],
-  'mapd': ['locationd', 'ubloxd']
+  'locationd': ['ubloxd'],
+  'mapd': ['locationd', 'ubloxd'],
+  'modeld': ['camerad'],
+  'dmonitoringd': ['dmonitoringmodeld'],
+  'ui': ['logmessaged']  # 确保日志服务先于UI启动
 }
 
 def ensure_dependencies(proc_name: str, running_procs: set) -> bool:
@@ -122,3 +126,4 @@ def ensure_dependencies(proc_name: str, running_procs: set) -> bool:
     if dep not in running_procs:
       return False
   return True
+
