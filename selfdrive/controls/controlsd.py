@@ -15,7 +15,7 @@ from panda import ALTERNATIVE_EXPERIENCE
 from openpilot.system.version import is_release_branch, get_short_branch
 from openpilot.selfdrive.boardd.boardd import can_list_to_can_capnp
 from openpilot.selfdrive.car.car_helpers import get_car, get_startup_event, get_one_can
-#from openpilot.selfdrive.controls.lib.lateral_planner import CAMERA_OFFSET
+from openpilot.selfdrive.controls.lib.lateral_planner import CAMERA_OFFSET
 from openpilot.selfdrive.controls.lib.drive_helpers import VCruiseHelper, get_lag_adjusted_curvature,get_road_edge, CONTROL_N
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_CONTROL_SPEED
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
@@ -943,8 +943,8 @@ class Controls:
       r_lane_change_prob = desire_prediction[Desire.laneChangeRight]
 
       lane_lines = model_v2.laneLines
-      l_lane_close = left_lane_visible and (lane_lines[1].y[0] > -(1.08 + self.cam_offset))
-      r_lane_close = right_lane_visible and (lane_lines[2].y[0] < (1.08 - self.cam_offset))
+      l_lane_close = left_lane_visible and (lane_lines[1].y[0] > -(1.08 + self.camera_offset))
+      r_lane_close = right_lane_visible and (lane_lines[2].y[0] < (1.08 - self.camera_offset))
 
       hudControl.leftLaneDepart = bool(l_lane_change_prob > LANE_DEPARTURE_THRESHOLD and l_lane_close)
       hudControl.rightLaneDepart = bool(r_lane_change_prob > LANE_DEPARTURE_THRESHOLD and r_lane_close)

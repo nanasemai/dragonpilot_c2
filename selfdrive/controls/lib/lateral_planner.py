@@ -16,10 +16,12 @@ from openpilot.selfdrive.controls.lib.lane_planner import LanePlanner
 from openpilot.common.conversions import Conversions as CV
 
 TRAJECTORY_SIZE = 33
-# if EON:
-#   CAMERA_OFFSET = -0.06
-# else:
-#   CAMERA_OFFSET = 0.04
+# 根据设备类型设置相机偏移值（单位：米）
+# EON是旧款设备，需要不同的偏移配置
+if EON:
+  CAMERA_OFFSET = -0.06  # EON设备相机偏移量为-6厘米(向左)
+else:
+  CAMERA_OFFSET = 0.04   # C2/C3设备相机偏移量为4厘米(向右)
 
 
 PATH_COST = 1.0
