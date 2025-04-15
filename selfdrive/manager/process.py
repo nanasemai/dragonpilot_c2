@@ -104,73 +104,54 @@ class ManagerProcess(ABC):
   @abstractmethod
   def start(self) -> None:
     pass
-  def check_watchdog(self, started: bool) -> None:
-      if self.watchdog_max_dt is None or self.proc is None:
-          return
-          
-      # 添加检查频率限制
-      current_time = time.monotonic()
-      if hasattr(self, '_last_check_time') and current_time - self._last_check_time < 0.5:  # 每秒最多检查2次
-          return
-      self._last_check_time = current_time
-
-      try:
-          fn = WATCHDOG_FN + str(self.proc.pid)
-          if os.path.exists(fn):  # 先检查文件是否存在
-              with open(fn, "rb") as f:
-                  self.last_watchdog_time = struct.unpack('Q', f.read())[0]
-      except Exception:
-          pass
-
-      dt = time.monotonic() - self.last_watchdog_time / 1e9
-      # 添加重启计数和冷却时间
-      if not hasattr(self, 'restart_count'):
-          self.restart_count = 0
-          self.last_restart_time = 0
-          
-      current_time = time.monotonic()
-      if dt > self.watchdog_max_dt:
-          if self.watchdog_seen and ENABLE_WATCHDOG:
-              # 检查重启频率
-              if current_time - self.last_restart_time > 300:  # 5分钟重置计数
-                  self.restart_count = 0
-
-              self.restart_count += 1
-              if self.restart_count > 3:  # 如果5分钟内重启超过3次
-                  cloudlog.error(f"Process {self.name} restarting too frequently, waiting for cool down")
-                  time.sleep(60)  # 等待1分钟再重启
-                  self.restart_count = 0
-
-              self.last_restart_time = current_time
-              cloudlog.error(f"Watchdog timeout for {self.name} (exitcode {self.proc.exitcode}) restarting ({started=})")
-              self.restart()
-      else:
-          self.watchdog_seen = True
 
   def restart(self) -> None:
-    if self.proc is not None:
-      self.stop()
+    self.stop(sig=signal.SIGKILL)
     self.start()
 
-  def stop(self, retry: bool = True, block: bool = True, sig: Optional[signal.Signals] = None) -> Optional[int]:
-    if self.proc is None or self.proc.exitcode is not None:
-        return self.proc.exitcode if self.proc else None
+  def check_watchdog(self, started: bool) -> None:
+    if self.watchdog_max_dt is None or self.proc is None:
+      return
 
-    if not self.shutting_down:
+    try:
+      fn = WATCHDOG_FN + str(self.proc.pid)
+      with open(fn, "rb") as f:
+        # TODO: why can't pylint find struct.unpack?
+        self.last_watchdog_time = struct.unpack('Q', f.read())[0]
+    except Exception:
+      pass
+
+    dt = time.monotonic() - self.last_watchdog_time / 1e9
+
+    if dt > self.watchdog_max_dt:
+      if self.watchdog_seen and ENABLE_WATCHDOG:
+        cloudlog.error(f"Watchdog timeout for {self.name} (exitcode {self.proc.exitcode}) restarting ({started=})")
+        self.restart()
+    else:
+      self.watchdog_seen = True
+
+  def stop(self, retry: bool = True, block: bool = True, sig: Optional[signal.Signals] = None) -> Optional[int]:
+    if self.proc is None:
+      return None
+
+    if self.proc.exitcode is None:
+      if not self.shutting_down:
         cloudlog.info(f"killing {self.name}")
         if sig is None:
-            sig = signal.SIGKILL if self.sigkill else signal.SIGINT
+          sig = signal.SIGKILL if self.sigkill else signal.SIGINT
         self.signal(sig)
         self.shutting_down = True
 
-    if block:
-        join_process(self.proc, 5)
-        if self.proc.exitcode is None and retry:
-            cloudlog.info(f"killing {self.name} with SIGKILL")
-            self.signal(signal.SIGKILL)
-            self.proc.join()
+        if not block:
+          return None
 
-    return self.proc.exitcode
+      join_process(self.proc, 5)
+
+      # If process failed to die send SIGKILL
+      if self.proc.exitcode is None and retry:
+        cloudlog.info(f"killing {self.name} with SIGKILL")
+        self.signal(signal.SIGKILL)
+        self.proc.join()
 
     ret = self.proc.exitcode
     cloudlog.info(f"{self.name} is dead with {ret}")
@@ -239,7 +220,6 @@ class NativeProcess(ManagerProcess):
 
 class PythonProcess(ManagerProcess):
   def __init__(self, name, module, should_run, enabled=True, sigkill=False, watchdog_max_dt=None):
-    self._module = None  # 添加模块缓存
     self.name = name
     self.module = module
     self.should_run = should_run
@@ -249,11 +229,14 @@ class PythonProcess(ManagerProcess):
     self.launcher = launcher
 
   def prepare(self) -> None:
-    if self.enabled and (self._module is None or self.module == "selfdrive.mapd.mapd" and not MAPD_ACTIVATED):
+    if self.enabled:
+      if self.module == "selfdrive.mapd.mapd" and not MAPD_ACTIVATED:
+        return
       cloudlog.info(f"preimporting {self.module}")
-      self._module = importlib.import_module(self.module)  # 缓存导入的模块
+      importlib.import_module(self.module)
 
   def start(self) -> None:
+    # In case we only tried a non blocking stop we need to stop it before restarting
     if self.shutting_down:
       self.stop()
 
@@ -261,7 +244,6 @@ class PythonProcess(ManagerProcess):
       return
 
     cloudlog.info(f"starting python {self.module}")
-    # 使用缓存的模块对象避免重复导入
     self.proc = Process(name=self.name, target=self.launcher, args=(self.module, self.name))
     self.proc.start()
     self.watchdog_seen = False

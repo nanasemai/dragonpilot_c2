@@ -29,18 +29,16 @@ def build(spinner: Spinner, dirty: bool = False, minimal: bool = False) -> None:
   env['SCONS_PROGRESS'] = "1"
   nproc = os.cpu_count()
   if nproc is None:
-    nproc = 3
+    nproc =3
 
-  # 添加编译优化参数
   extra_args = ["--minimal"] if minimal else []
-  if not minimal:
-    extra_args.extend(["--optimization=fast", "--debug=no"])
+
+  # building with all cores can result in using too
+  # much memory, so retry with less parallelism
   compile_output: List[bytes] = []
-  # 调整并行度策略
-  for n in (min(nproc, 8), max(nproc//2, 2), 1):  # 限制最大并行度为8
+  for n in (nproc, nproc/2, 1):
     compile_output.clear()
-    scons = subprocess.Popen(["scons", f"-j{int(n)}", "--cache-populate", *extra_args],
-                           cwd=BASEDIR, env=env, stderr=subprocess.PIPE)
+    scons: subprocess.Popen = subprocess.Popen(["scons", f"-j{int(n)}", "--cache-populate", *extra_args], cwd=BASEDIR, env=env, stderr=subprocess.PIPE)
     assert scons.stderr is not None
 
     # Read progress from stderr and update spinner
@@ -79,24 +77,17 @@ def build(spinner: Spinner, dirty: bool = False, minimal: bool = False) -> None:
       with TextWindow("openpilot failed to build\n \n" + error_s) as t:
         t.wait_for_exit()
     exit(1)
-  # 优化缓存清理策略
-  def clean_cache():
-    cache_files = [f for f in CACHE_DIR.rglob('*') if f.is_file()]
-    cache_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)  # 最近使用的优先保留
 
-    cache_size = sum(f.stat().st_size for f in cache_files)
-    current_time = time.time()
+  # enforce max cache size
+  cache_files = [f for f in CACHE_DIR.rglob('*') if f.is_file()]
+  cache_files.sort(key=lambda f: f.stat().st_mtime)
+  cache_size = sum(f.stat().st_size for f in cache_files)
+  for f in cache_files:
+    if cache_size < MAX_CACHE_SIZE:
+      break
+    cache_size -= f.stat().st_size
+    f.unlink()
 
-    # 保留最近使用和频繁使用的缓存
-    for f in cache_files:
-      if cache_size < MAX_CACHE_SIZE * 0.8:  # 保留20%余量
-        break
-      if current_time - f.stat().st_mtime > 86400:  # 24小时
-        try:
-          cache_size -= f.stat().st_size
-          f.unlink()
-        except Exception:
-          pass
 
 if __name__ == "__main__" and not PREBUILT:
   spinner = Spinner()

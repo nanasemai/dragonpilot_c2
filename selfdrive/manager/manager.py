@@ -130,13 +130,6 @@ def manager_init() -> None:
     if params.get(k) is None:
       params.put(k, v)
 
-  # is this dashcam?
-  if os.getenv("PASSIVE") is not None:
-    params.put_bool("Passive", bool(int(os.getenv("PASSIVE", "0"))))
-
-  if params.get("Passive") is None:
-    raise Exception("Passive must be set to continue")
-
   # Create folders needed for msgq
   try:
     os.mkdir("/dev/shm")
@@ -181,35 +174,10 @@ def manager_init() -> None:
                        dirty=is_dirty(),
                        device=HARDWARE.get_device_type())
 
-def manager_prepare() -> None:
-  # 按功能关键程度对进程排序
-  priority_processes = {
-    # 第一优先级：硬件通信核心和UI
-    'critical': ['boardd', 'pandad', 'logmessaged', 'ui'],
-    # 第二优先级：车辆控制和路径规划
-    'high': ['controlsd', 'plannerd', 'radard', 'camerad'],
-    # 第三优先级：感知模型和定位
-    'medium': ['modeld', 'locationd', 'paramsd', 'ubloxd', 'gpsd'],
-    # 第四优先级：监控和辅助服务
-    'low': ['uploader', 'logcatd', 'proclogd', 'navd', 'dmonitoringd']
-  }
-  prepared = set()
-  # 按优先级顺序准备进程
-  for priority in ['critical', 'high', 'medium', 'low']:
-    for proc_name in priority_processes[priority]:
-      if proc_name in managed_processes and proc_name not in prepared:
-        if ensure_dependencies(proc_name, prepared):
-          managed_processes[proc_name].prepare()
-          prepared.add(proc_name)
-          # 关键进程间添加短暂延迟
-          if priority in ['critical', 'high']:
-            time.sleep(0.05)
-
-  # 准备其他未分类进程
+  # preimport all processes
   for p in managed_processes.values():
-    if p.name not in prepared:
-      managed_processes[p.name].prepare()
-      prepared.add(p.name)
+    p.prepare()
+
 
 def manager_cleanup() -> None:
   # send signals to kill all procs
@@ -221,6 +189,7 @@ def manager_cleanup() -> None:
     p.stop(block=True)
 
   cloudlog.info("everything is dead")
+
 
 def manager_thread() -> None:
   cloudlog.bind(daemon="manager")
@@ -253,7 +222,7 @@ def manager_thread() -> None:
   ignore += [x for x in os.getenv("BLOCK", "").split(",") if len(x) > 0]
 
   if not params.get_bool("dp_mapd"):
-    ignore += ["mapd"]
+    ignore += ["mapd", "gpxd"]
 
   if not params.get_bool("dp_gpxd"):
     ignore += ["gpxd"]
@@ -280,7 +249,7 @@ def manager_thread() -> None:
   #add by nana
   ignore += ["manage_athenad"]
 
-  sm = messaging.SubMaster(['deviceState', 'carParams'], poll='deviceState')
+  sm = messaging.SubMaster(['deviceState', 'carParams'], poll=['deviceState'])
   pm = messaging.PubMaster(['managerState'])
 
   last_network_type = log.DeviceState.NetworkType.none
@@ -291,7 +260,7 @@ def manager_thread() -> None:
   started_prev = False
   last_time_save = 0  # 添加时间保存计数器
   while True:
-    sm.update(1000)
+    sm.update()
 
     started = sm['deviceState'].started
     current_time = int(time.time())
@@ -380,18 +349,8 @@ def manager_thread() -> None:
 
 
 def main() -> None:
-  prepare_only = os.getenv("PREPAREONLY") is not None
-
   manager_init()
-
-  # 最先启动UI
-  if not prepare_only:
-    managed_processes['ui'].start()
-    time.sleep(0.1)  # 确保UI稳定启动
-
-  manager_prepare()
-
-  if prepare_only:
+  if os.getenv("PREPAREONLY") is not None:
     return
 
   # SystemExit on sigterm
@@ -429,6 +388,7 @@ def get_support_car_list():
       list.append(name)
   cars["cars"] = sorted(list)
   return json.dumps(cars)
+
 
 if __name__ == "__main__":
   unblock_stdout()
