@@ -103,8 +103,10 @@ class CAR(StrEnum):
   RAV4_TSS2 = "TOYOTA RAV4 2019"
   RAV4_TSS2_2022 = "TOYOTA RAV4 2022"
   RAV4_TSS2_2023 = "TOYOTA RAV4 2023"
+  RAV4_PRIME = "TOYOTA RAV4 PRIME 2021"
   MIRAI = "TOYOTA MIRAI 2021"  # TSS 2.5
   SIENNA = "TOYOTA SIENNA 2018"
+  SIENNA_4TH_GEN = "TOYOTA SIENNA 2021"
 
   # Lexus
   LEXUS_CTH = "LEXUS CT HYBRID 2018"
@@ -114,12 +116,11 @@ class CAR(StrEnum):
   LEXUS_IS_TSS2 = "LEXUS IS 2023"
   LEXUS_NX = "LEXUS NX 2018"
   LEXUS_NX_TSS2 = "LEXUS NX 2020"
+  LEXUS_LC_TSS2 = "LEXUS LC 2024"
   LEXUS_RC = "LEXUS RC 2020"
   LEXUS_RX = "LEXUS RX 2016"
   LEXUS_RX_TSS2 = "LEXUS RX 2020"
   LEXUS_GS_F = "LEXUS GS F 2016"
-
-
 class Footnote(Enum):
   CAMRY = CarFootnote(
     "openpilot operates above 28mph for Camry 4CYL L, 4CYL LE and 4CYL SE which don't have Full-Speed Range Dynamic Radar Cruise Control.",
@@ -213,10 +214,12 @@ CAR_INFO: Dict[str, Union[ToyotaCarInfo, List[ToyotaCarInfo]]] = {
   ],
   CAR.RAV4_TSS2_2023: [
     ToyotaCarInfo("Toyota RAV4 2023-24"),
-    ToyotaCarInfo("Toyota RAV4 Hybrid 2023-24"),
+    ToyotaCarInfo("Toyota RAV4 Hybrid 2023-25", video_link="https://youtu.be/4eIsEq4L4Ng"),
   ],
+  CAR.RAV4_PRIME: ToyotaCarInfo("Toyota RAV4 Prime 2021-23"),
   CAR.MIRAI: ToyotaCarInfo("Toyota Mirai 2021"),
   CAR.SIENNA: ToyotaCarInfo("Toyota Sienna 2018-20", video_link="https://www.youtube.com/watch?v=q1UPOo4Sh68", min_enable_speed=MIN_ACC_SPEED),
+  CAR.SIENNA_4TH_GEN: ToyotaCarInfo("Toyota Sienna 2021-23"),
 
   # Lexus
   CAR.LEXUS_CTH: ToyotaCarInfo("Lexus CT Hybrid 2017-18", "Lexus Safety System+"),
@@ -239,6 +242,7 @@ CAR_INFO: Dict[str, Union[ToyotaCarInfo, List[ToyotaCarInfo]]] = {
     ToyotaCarInfo("Lexus NX 2020-21"),
     ToyotaCarInfo("Lexus NX Hybrid 2020-21"),
   ],
+  CAR.LEXUS_LC_TSS2: ToyotaCarInfo("Lexus LC 2024"),
   CAR.LEXUS_RC: ToyotaCarInfo("Lexus RC 2018-20"),
   CAR.LEXUS_RX: [
     ToyotaCarInfo("Lexus RX 2016", "Lexus Safety System+"),

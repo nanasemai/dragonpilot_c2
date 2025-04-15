@@ -173,6 +173,30 @@ class CarInterface(CarInterfaceBase):
           ret.lateralTuning.pid.kf = 0.00004
           break
 
+    elif candidate == CAR.RAV4_PRIME:
+      ret.wheelbase = 2.68  # RAV4 Prime轴距
+      ret.steerRatio = 16.88  # RAV4 Prime转向比
+      ret.tireStiffnessFactor = 0.5533  # RAV4 Prime轮胎刚度系数
+      ret.mass = 4372. * CV.LB_TO_KG  # RAV4 Prime车重
+      ret.lateralTuning.init('pid')
+      ret.lateralTuning.pid.kiBP = [0.0]
+      ret.lateralTuning.pid.kpBP = [0.0]
+      ret.lateralTuning.pid.kpV = [0.6]
+      ret.lateralTuning.pid.kiV = [0.1]
+      ret.lateralTuning.pid.kf = 0.00007818594
+
+    elif candidate == CAR.SIENNA_4TH_GEN:
+      ret.wheelbase = 3.06  # Sienna轴距
+      ret.steerRatio = 17.8  # Sienna转向比
+      ret.tireStiffnessFactor = 0.444  # Sienna轮胎刚度系数
+      ret.mass = 4625. * CV.LB_TO_KG  # Sienna车重
+      ret.lateralTuning.init('pid')
+      ret.lateralTuning.pid.kiBP = [0.0]
+      ret.lateralTuning.pid.kpBP = [0.0]
+      ret.lateralTuning.pid.kpV = [0.6]
+      ret.lateralTuning.pid.kiV = [0.1]
+      ret.lateralTuning.pid.kf = 0.00007818594
+
     elif candidate == CAR.COROLLA_TSS2:
       ret.wheelbase = 2.67  # Average between 2.70 for sedan and 2.64 for hatchback
       ret.steerRatio = 13.9
@@ -217,6 +241,12 @@ class CarInterface(CarInterfaceBase):
       ret.steerRatio = 14.7
       ret.tireStiffnessFactor = 0.444  # not optimized yet
       ret.mass = 4070 * CV.LB_TO_KG
+
+    elif candidate == CAR.LEXUS_LC_TSS2:
+      ret.wheelbase = 2.87
+      ret.steerRatio = 13.0
+      ret.tireStiffnessFactor = 0.444
+      ret.mass = 4500. * CV.LB_TO_KG
 
     elif candidate == CAR.PRIUS_TSS2:
       ret.wheelbase = 2.70002  # from toyota online sepc.
