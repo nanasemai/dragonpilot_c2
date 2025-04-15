@@ -30,16 +30,16 @@ def build(spinner: Spinner, dirty: bool = False, minimal: bool = False) -> None:
   nproc = os.cpu_count()
   if nproc is None:
     nproc = 3
-  
+
   # 添加编译优化参数
   extra_args = ["--minimal"] if minimal else []
   if not minimal:
     extra_args.extend(["--optimization=fast", "--debug=no"])
-  
+  compile_output: List[bytes] = []
   # 调整并行度策略
   for n in (min(nproc, 8), max(nproc//2, 2), 1):  # 限制最大并行度为8
     compile_output.clear()
-    scons = subprocess.Popen(["scons", f"-j{int(n)}", "--cache-populate", *extra_args], 
+    scons = subprocess.Popen(["scons", f"-j{int(n)}", "--cache-populate", *extra_args],
                            cwd=BASEDIR, env=env, stderr=subprocess.PIPE)
     assert scons.stderr is not None
 
@@ -83,10 +83,10 @@ def build(spinner: Spinner, dirty: bool = False, minimal: bool = False) -> None:
   def clean_cache():
     cache_files = [f for f in CACHE_DIR.rglob('*') if f.is_file()]
     cache_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)  # 最近使用的优先保留
-    
+
     cache_size = sum(f.stat().st_size for f in cache_files)
     current_time = time.time()
-    
+
     # 保留最近使用和频繁使用的缓存
     for f in cache_files:
       if cache_size < MAX_CACHE_SIZE * 0.8:  # 保留20%余量
