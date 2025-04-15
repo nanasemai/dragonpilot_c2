@@ -10,13 +10,29 @@ NO_IR_CTRL = os.path.isfile('/data/media/0/no_ir_ctrl')
 WEBCAM = os.getenv("USE_WEBCAM") is not None
 
 def driverview(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # 简化判断逻辑
   return started or params.get_bool("IsDriverViewEnabled")
+
+def ublox_available() -> bool:
+  # 缓存检查结果避免重复IO
+  if not hasattr(ublox_available, 'cached'):
+    ublox_available.cached = True if EON else os.path.exists('/dev/ttyHS0') and not os.path.exists('/persist/comma/use-quectel-gps')
+  return ublox_available.cached
 
 def notcar(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started and CP.notCar
 
+# 提前缓存硬件类型
+HARDWARE_CACHE = {
+  'is_pc': PC,
+  'is_eon': EON,
+  'is_tici': TICI,
+  'no_ir_ctrl': os.path.isfile('/data/media/0/no_ir_ctrl')
+}
+
 def iscar(started: bool, params: Params, CP: car.CarParams) -> bool:
-  return started and not CP.notCar
+  # 使用缓存减少IO
+  return started and not CP.notCar and not HARDWARE_CACHE['is_pc']
 
 def logging(started, params, CP: car.CarParams) -> bool:
   run = (not CP.notCar) or not params.get_bool("DisableLogging")
@@ -108,14 +124,17 @@ managed_processes = {p.name: p for p in procs}
 
 # 更新进程依赖关系
 PROCESS_DEPENDENCIES = {
+  'ui': ['logmessaged'],  # UI最优先启动
   'controlsd': ['boardd', 'plannerd', 'radard', 'pandad'],
   'plannerd': ['locationd', 'modeld'],
   'radard': ['modeld'],
   'locationd': ['ubloxd'],
   'mapd': ['locationd', 'ubloxd'],
-  'modeld': ['camerad'],
+  'modeld': ['camerad'],  # 视觉模型依赖摄像头
   'dmonitoringd': ['dmonitoringmodeld'],
-  'ui': ['logmessaged']  # 确保日志服务先于UI启动
+  'camerad': [],  # 摄像头作为基础服务无依赖
+  'logmessaged': [],  # 日志服务无依赖
+  'pandad': []  # Panda设备无依赖
 }
 
 def ensure_dependencies(proc_name: str, running_procs: set) -> bool:

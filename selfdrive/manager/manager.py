@@ -303,28 +303,36 @@ def manager_thread() -> None:
         set_time(cloudlog)
       last_network_type = current_network
 
-    # 在以下情况保存时间：
-    # 1. 每5分钟保存一次基础时间
-    # 2. 网络连接成功时
-    # 3. 进入或退出行驶状态时
-    if (current_time - last_time_save >= 300 or  # 5分钟
-        (sm.updated['deviceState'] and sm['deviceState'].networkType != last_network_type) or
-        started != started_prev):
-      try:
-        params.put("LastValidTime", str(current_time))
-        last_time_save = current_time
-      except Exception as e:
-        cloudlog.warning(f"保存系统时间失败: {str(e)}")
+    # 优化时间保存策略
+    time_save_conditions = (
+        current_time - last_time_save >= 300,  # 5分钟
+        sm.updated['deviceState'] and sm['deviceState'].networkType != last_network_type,
+        started != started_prev
+    )
+    
+    if any(time_save_conditions):
+        try:
+            # 只在时间变化超过1秒时才保存
+            if abs(current_time - int(params.get("LastValidTime", 0))) > 1:
+                params.put("LastValidTime", str(current_time))
+                last_time_save = current_time
+        except Exception as e:
+            cloudlog.warning(f"保存系统时间失败: {str(e)}")
 
     # 添加进程状态监控
-    process_states = {}
-    for p in managed_processes.values():
-      if p.proc is not None:
-        process_states[p.name] = {
-          'alive': p.proc.is_alive(),
-          'exitcode': p.proc.exitcode if not p.proc.is_alive() else None,
-          'restart_count': getattr(p, 'restart_count', 0)
-        }
+    # 只在需要时检查进程状态
+    process_check_interval = 2  # 每2秒检查一次
+    if current_time % process_check_interval < 0.1:  # 利用时间戳实现间隔检查
+        process_states = {}
+        for p in managed_processes.values():
+            if p.proc is not None:
+                state = {
+                    'alive': p.proc.is_alive(),
+                    'exitcode': p.proc.exitcode if not p.proc.is_alive() else None
+                }
+                if not state['alive']:
+                    cloudlog.error(f"Process {p.name} died with exitcode {state['exitcode']}")
+                process_states[p.name] = state
 
     # 记录异常进程状态
     for name, state in process_states.items():
@@ -350,7 +358,7 @@ def manager_thread() -> None:
                        for p in managed_processes.values() if p.proc)
 
     last_print_time = 0
-    PRINT_INTERVAL = 5  # 每5秒打印一次
+    PRINT_INTERVAL = 6  # 每6秒打印一次
 
     # 添加时间间隔检查
     current_time = time.time()

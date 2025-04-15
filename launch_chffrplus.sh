@@ -15,17 +15,23 @@ function two_init {
   fi
 
   mount -o remount,rw /system
+
   # font installer
   if [ -f /EON ]; then
-    if [ ! -f /system/fonts/NotoSansCJKtc-Regular.otf ]; then
-      rm -fr /system/fonts/NotoSansTC*.otf
-      rm -fr /system/fonts/NotoSansSC*.otf
-      rm -fr /system/fonts/NotoSansKR*.otf
-      rm -fr /system/fonts/NotoSansJP*.otf
-      cp -rf /data/openpilot/selfdrive/assets/fonts/NotoSansCJKtc-* /system/fonts/
-      cp -rf /data/openpilot/selfdrive/assets/fonts/fonts.xml /system/etc/fonts.xml
-      chmod 644 /system/etc/fonts.xml
-      chmod 644 /system/fonts/NotoSansCJKtc-*
+    # 检查字体文件是否存在，只有在缺失时才在后台进行安装
+    if [ ! -f /system/fonts/NotoSansCJKtc-Regular.otf ] || [ ! -f /system/etc/fonts.xml ]; then
+      (
+        mount -o remount,rw /system
+        rm -fr /system/fonts/NotoSansTC*.otf
+        rm -fr /system/fonts/NotoSansSC*.otf
+        rm -fr /system/fonts/NotoSansKR*.otf
+        rm -fr /system/fonts/NotoSansJP*.otf
+        cp -rf /data/openpilot/selfdrive/assets/fonts/NotoSansCJKtc-* /system/fonts/
+        cp -rf /data/openpilot/selfdrive/assets/fonts/fonts.xml /system/etc/fonts.xml
+        chmod 644 /system/etc/fonts.xml
+        chmod 644 /system/fonts/NotoSansCJKtc-*
+        mount -o remount,r /system
+      ) &
     fi
   fi
 
@@ -46,9 +52,12 @@ function two_init {
   fi
   mount -o remount,r /system
 
-  # always update to the latest update.zip
-  if [ -f /ONEPLUS ]; then
-    cp -f "$BASEDIR/system/hardware/eon/update.zip" "/data/media/0/update.zip"
+  # 只在需要时更新update.zip
+  if [ -f /ONEPLUS ] && [ -f "$BASEDIR/system/hardware/eon/update.zip" ]; then
+    if [ ! -f "/data/media/0/update.zip" ] || 
+       [ "$BASEDIR/system/hardware/eon/update.zip" -nt "/data/media/0/update.zip" ]; then
+      cp -f "$BASEDIR/system/hardware/eon/update.zip" "/data/media/0/update.zip" &
+    fi
   fi
 
   # *** shield cores 2-3 ***
@@ -237,15 +246,27 @@ function two_init {
   LD_LIBRARY_PATH="" content insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:1
 
   # disable bluetooth
-  service call bluetooth_manager 8
-
+  # disable bluetooth
+  (service call bluetooth_manager 8) &
+  
   # wifi scan
-  wpa_cli IFNAME=wlan0 SCAN
+  (wpa_cli IFNAME=wlan0 SCAN) &
 
   # install missing libs
   LIB_PATH="/data/openpilot/system/hardware/eon/libs"
   PY_LIB_DEST="/system/comma/usr/lib/python3.8/site-packages"
-  mount -o remount,rw /system
+  (
+    mount -o remount,rw /system
+    # 批量检查并安装所有模块
+    for MODULE in tomli opspline overpy hatanaka markdown_it mdurl strenum; do
+      [ ! -d "$PY_LIB_DEST/$MODULE" ] && tar -zxf "$LIB_PATH/$MODULE.tar.gz" -C "$PY_LIB_DEST/"
+    done
+    # 单独处理文件
+    [ ! -f "$PY_LIB_DEST/ncompress.cpython-38.so" ] && cp -f "$LIB_PATH/ncompress.cpython-38.so" "$PY_LIB_DEST/"
+    [ ! -f "$PY_LIB_DEST/zipp.py" ] && cp -f "$LIB_PATH/zipp.py" "$PY_LIB_DEST/"
+    [ ! -f "$PY_LIB_DEST/spidev.cpython-38.so" ] && cp -f "$LIB_PATH/spidev.cpython-38.so" "$PY_LIB_DEST/"
+    mount -o remount,r /system
+  ) &
   # tomli
   MODULE="tomli"
   if [ ! -d "$PY_LIB_DEST/$MODULE" ]; then
@@ -324,12 +345,12 @@ function two_init {
   fi
 
   # Check for NEOS update
-  if [ -f /LEECO ] && [ $(< /VERSION) != "$REQUIRED_NEOS_VERSION" ]; then
-    echo "Installing NEOS update"
+  if [ -f /LEECO ] && [ -f /VERSION ] && [ $(< /VERSION) != "$REQUIRED_NEOS_VERSION" ]; then
+    echo "Installing NEOS update" > /dev/null  # 静默输出
     NEOS_PY="$DIR/system/hardware/eon/neos.py"
     MANIFEST="$DIR/system/hardware/eon/neos.json"
-    $NEOS_PY --swap-if-ready $MANIFEST
-    $DIR/system/hardware/eon/updater $NEOS_PY $MANIFEST
+    $NEOS_PY --swap-if-ready $MANIFEST &
+    $DIR/system/hardware/eon/updater $NEOS_PY $MANIFEST &
   fi
 
   # One-time fix for a subset of OP3T with gyro orientation offsets.
@@ -380,37 +401,16 @@ function launch {
   # Pull time from panda
   $DIR/selfdrive/boardd/set_time.py
 
-  # Check to see if there's a valid overlay-based update available. Conditions
-  # are as follows:
-  #
-  # 1. The BASEDIR init file has to exist, with a newer modtime than anything in
-  #    the BASEDIR Git repo. This checks for local development work or the user
-  #    switching branches/forks, which should not be overwritten.
-  # 2. The FINALIZED consistent file has to exist, indicating there's an update
-  #    that completed successfully and synced to disk.
-
-  if [ -f "${BASEDIR}/.overlay_init" ]; then
-    find ${BASEDIR}/.git -newer ${BASEDIR}/.overlay_init | grep -q '.' 2> /dev/null
-    if [ $? -eq 0 ]; then
-      echo "${BASEDIR} has been modified, skipping overlay update installation"
-    else
-      if [ -f "${STAGING_ROOT}/finalized/.overlay_consistent" ]; then
-        if [ ! -d /data/safe_staging/old_openpilot ]; then
-          echo "Valid overlay update found, installing"
-          LAUNCHER_LOCATION="${BASH_SOURCE[0]}"
-
-          mv $BASEDIR /data/safe_staging/old_openpilot
-          mv "${STAGING_ROOT}/finalized" $BASEDIR
-          cd $BASEDIR
-
-          echo "Restarting launch script ${LAUNCHER_LOCATION}"
-          unset REQUIRED_NEOS_VERSION
-          unset AGNOS_VERSION
-          exec "${LAUNCHER_LOCATION}"
-        else
-          echo "openpilot backup found, not updating"
-          # TODO: restore backup? This means the updater didn't start after swapping
-        fi
+  # Check overlay update
+  if [ -f "${BASEDIR}/.overlay_init" ] && [ -f "${STAGING_ROOT}/finalized/.overlay_consistent" ]; then
+    if ! find ${BASEDIR}/.git -newer ${BASEDIR}/.overlay_init | grep -q '.' 2> /dev/null; then
+      if [ ! -d /data/safe_staging/old_openpilot ]; then
+        echo "Valid overlay update found, installing"
+        LAUNCHER_LOCATION="${BASH_SOURCE[0]}"
+        mv $BASEDIR /data/safe_staging/old_openpilot &
+        mv "${STAGING_ROOT}/finalized" $BASEDIR &
+        cd $BASEDIR
+        exec "${LAUNCHER_LOCATION}"
       fi
     fi
   fi
