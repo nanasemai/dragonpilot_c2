@@ -115,6 +115,7 @@ def manager_init() -> None:
     ("dp_lateral_path_offset", "0"),#单位厘米
     ("dp_lateral_torque_kp", "100"),  # 1.0
     ("dp_lateral_torque_ki", "10"),  # 0.1
+    ("dp_disable_gps", "0"),
 	  ("dp_lat_use_siglin", "0"),
   ]
   if not PC:
@@ -229,6 +230,9 @@ def manager_thread() -> None:
 
   if params.get_bool("dp_no_gps_ctrl"):
     ignore += ["ubloxd", "gpx_uploader", "gpxd", "mapd"]
+
+  if params.get_bool("dp_disable_gps"):
+    ignore += ["ubloxd", "gpx_uploader", "gpxd", "mapd"]  
 
   if not params.get_bool("dp_fleet_fileserv"):
     ignore += ["fleet_manager"]
