@@ -23,6 +23,13 @@ QUALITY_PRESETS = {
   }
 }
 
+# 数值到质量字符串的映射
+QUALITY_MAP = {
+    0: "low",
+    1: "medium", 
+    2: "high"
+}
+
 class Dashcamd:
   def __init__(self, config=None):
     # 默认配置
@@ -48,16 +55,24 @@ class Dashcamd:
     if config:
       self.update_config(config)
 
-  def update_config(self, config):
-    self.config.update(config)
-    #cloudlog.debug(f"配置更新: config={self.config}, quality={self.config['quality']}")
+    def update_config(self, config):
+        self.config.update(config)
+        
+        # 处理quality参数
+        quality = self.config['quality']
+        try:
+            # 如果是数值，转换为字符串
+            if isinstance(quality, int) or (isinstance(quality, str) and quality.isdigit()):
+                quality = int(quality)
+                quality = QUALITY_MAP.get(quality, "medium")
+        except (ValueError, TypeError):
+            quality = "medium"  # 默认中等质量
 
-    quality = self.config['quality']
-    if quality not in QUALITY_PRESETS:
-      quality = "medium"
+        if quality not in QUALITY_PRESETS:
+            quality = "medium"
 
-    self.quality_settings = QUALITY_PRESETS[quality]
-    self._update_storage_limits()
+        self.quality_settings = QUALITY_PRESETS[quality]
+        self._update_storage_limits()
 
   def _update_storage_limits(self):
     """根据配置更新存储限制"""

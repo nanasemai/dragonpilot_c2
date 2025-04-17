@@ -98,7 +98,7 @@ def manager_init() -> None:
     ("dp_device_mode", "1"),  # 设备运行模式: 0-节能 1-普通 2-性能
     ("dp_show_date_time", "1"),    # 是否显示时间: 0-不显示 1-显示
     # 行车记录仪相关参数
-    ("dp_dashcam_quality", "medium"),  # 视频质量：低/中/高
+    ("dp_dashcam_quality", "1"),  # 视频质量：0=低 1=中 2=高
     ("dp_dashcam_duration", "180"),    # 单个视频时长（秒）
     ("dp_dashcam_kept_hours", "15"),   # 视频保留时长（小时）
     ("dp_torqued_override", "0"),
@@ -117,6 +117,7 @@ def manager_init() -> None:
     ("dp_lateral_torque_ki", "10"),  # 0.1
     ("dp_disable_gps", "0"),
 	  ("dp_lat_use_siglin", "0"),
+    ("dp_device_go_off_road", "0"),  # 添加离线模式参数
   ]
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))
