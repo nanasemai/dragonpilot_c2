@@ -22,7 +22,7 @@ def dashcam_thread():
   # 读取配置
   dashcam_config = {
     'enabled': params.get_bool("dp_on_road_dashcam"),
-    'quality': params.get("dp_dashcam_quality", encoding='utf8') or "1", # 0=低 1=中 2=高
+    'quality': int(params.get("dp_dashcam_quality", encoding='utf8') or "1"), # 0=低 1=中 2=高
     'duration': int(params.get("dp_dashcam_duration", encoding='utf8') or "180"),
     'kept_hours': int(params.get("dp_dashcam_kept_hours", encoding='utf8') or "15")
   }
@@ -73,7 +73,7 @@ def dashcam_thread():
 
       # 检查配置变更
       new_enabled = params.get_bool("dp_on_road_dashcam")
-      new_quality = params.get("dp_dashcam_quality", encoding='utf8') or "1"  # 0=低 1=中 2=高
+      new_quality = int(params.get("dp_dashcam_quality", encoding='utf8') or "1")  # 0=低 1=中 2=高
       new_duration = int(params.get("dp_dashcam_duration", encoding='utf8') or "180")
       new_kept_hours = int(params.get("dp_dashcam_kept_hours", encoding='utf8') or "15")
       new_dev_mode = params.get_bool("DPDEVMODE")
