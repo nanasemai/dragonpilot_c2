@@ -107,17 +107,20 @@ class Dashcamd:
     #cloudlog.info("停止录制")
 
   def _stop_current_recording(self):
-    """停止当前录制进程"""
-    try:
-      if self.current_process:
-        self.current_process.terminate()
-        self.current_process.wait(timeout=2)
-      else:
-        subprocess.run(['killall', '-SIGINT', 'screenrecord'], check=False)
-    except Exception as e:
-      cloudlog.error(f"停止录制出错: {str(e)}")
-    finally:
-      self.current_process = None
+      try:
+        if self.current_process:
+          self.current_process.terminate()
+          try:
+            self.current_process.wait(timeout=2)
+          except subprocess.TimeoutExpired:
+            self.current_process.kill()
+            self.current_process.wait()
+        else:
+          subprocess.run(['killall', '-SIGINT', 'screenrecord'], check=False)
+      except Exception as e:
+        cloudlog.error(f"停止录制出错: {str(e)}")
+      finally:
+        self.current_process = None
 
   def _record_next_file(self):
     """录制下一个文件"""
@@ -129,7 +132,9 @@ class Dashcamd:
 
     try:
       now = datetime.datetime.now()
-      file_name = f"{now.strftime('%Y%m%d_%H%M%S')}_{self.session_id}_f{self.file_counter:04d}_{self.config['quality']}"
+      # 获取质量预设的英文名称
+      quality_name = self.quality_settings.get('name', self.config['quality'])
+      file_name = f"dashcam_{now.strftime('%Y%m%d_%H%M%S')}_{self.session_id}_f{self.file_counter:04d}_{quality_name}"
       self.file_counter += 1
       full_path = os.path.join(DASHCAM_VIDEOS_PATH, f"{file_name}.mp4")
 
@@ -147,8 +152,10 @@ class Dashcamd:
       self.current_process = subprocess.Popen(cmd, env=env)
 
       quality_info = f"质量: {self.config['quality']}, 比特率: {self.DASHCAM_BIT_RATES}"
+      # 可以改为使用质量名称
+      quality_info = f"质量: {quality_name}, 比特率: {self.DASHCAM_BIT_RATES//1000000}Mbps"  # 更易读的比特率显示
       if self.quality_settings["resolution"]:
-        quality_info += f", 分辨率: {self.quality_settings['resolution']}"
+        quality_info += f", 分辨率: {self.quality_settings['resolution'] or '原始分辨率'}"
       #cloudlog.info(f"开始录制文件: {full_path}, {quality_info}, 时长: {self.DASHCAM_DURATION}秒")
 
       # 启动监控线程，等待当前录制完成后继续下一个
@@ -183,23 +190,34 @@ class Dashcamd:
           if not os.path.isfile(full_path) or os.path.getsize(full_path) == 0:
             continue
 
-          # 尝试从文件名解析信息
           try:
             parts = f.split('_')
-            if len(parts) >= 4 and parts[0].startswith('s') and parts[1].startswith('f'):
-              session_id = int(parts[0][1:])
-              file_num = int(parts[1][1:])
-              files.append((full_path, session_id, file_num))
-            else:
-              files.append((full_path, 0, os.path.getmtime(full_path)))
-          except:
+            if len(parts) >= 6:  # dashcam_时间_sessionID_f序号_质量
+              try:
+                session_id = int(parts[2])  # 会话ID
+                file_num_str = parts[3]
+                file_num = int(file_num_str[1:]) if file_num_str.startswith('f') else int(file_num_str)
+                quality = parts[4]
+                
+                # 验证质量名称
+                if quality not in QUALITY_PRESETS:
+                    continue  # 跳过无效质量名称的文件
+                    
+                files.append((full_path, session_id, file_num))
+              except (ValueError, IndexError):
+                # 如果解析失败，使用文件修改时间作为排序依据
+                files.append((full_path, 0, os.path.getmtime(full_path)))
+          except Exception:
             files.append((full_path, 0, os.path.getmtime(full_path)))
 
         # 按会话ID和文件编号排序，删除最旧的
         if files:
           files.sort(key=lambda x: (x[1], x[2]))
-          os.remove(files[0][0])
-          #cloudlog.info(f"已删除旧文件: {files[0][0]}")
+          try:
+            os.remove(files[0][0])
+            #cloudlog.info(f"已删除旧文件: {files[0][0]}")
+          except Exception as e:
+            cloudlog.error(f"删除文件失败: {str(e)}")
     except Exception as e:
       cloudlog.error(f"清理空间出错: {str(e)}")
 
