@@ -98,7 +98,7 @@ procs = [
   # mapd
   PythonProcess("mapd", "selfdrive.mapd.mapd", only_onroad),
   # dashcam
-  PythonProcess("systemd", "selfdrive.dragonpilot.systemd", only_onroad),
+  PythonProcess("systemd", "selfdrive.dragonpilot.systemd", always_run),
   # gpxd
   PythonProcess("gpxd", "selfdrive.dragonpilot.gpxd",only_onroad),
   # PythonProcess("gpx_uploader", "selfdrive.dragonpilot.gpx_uploader", offroad=True),

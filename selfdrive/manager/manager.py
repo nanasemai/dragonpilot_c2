@@ -116,7 +116,7 @@ def manager_init() -> None:
     ("dp_lateral_torque_kp", "100"),  # 1.0
     ("dp_lateral_torque_ki", "10"),  # 0.1
     ("dp_disable_gps", "0"),
-	  ("dp_lat_use_siglin", "0"),
+	("dp_lat_use_siglin", "0"),
     ("dp_device_go_off_road", "0"),  # 添加离线模式参数
   ]
   if not PC:
