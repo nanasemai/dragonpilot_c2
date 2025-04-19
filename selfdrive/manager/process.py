@@ -104,43 +104,31 @@ class ManagerProcess(ABC):
   @abstractmethod
   def start(self) -> None:
     pass
-  def check_watchdog(self, started: bool) -> None:  # 修复缩进
+
+  def restart(self) -> None:
+    self.stop(sig=signal.SIGKILL)
+    self.start()
+
+  def check_watchdog(self, started: bool) -> None:
     if self.watchdog_max_dt is None or self.proc is None:
       return
+
     try:
       fn = WATCHDOG_FN + str(self.proc.pid)
       with open(fn, "rb") as f:
+        # TODO: why can't pylint find struct.unpack?
         self.last_watchdog_time = struct.unpack('Q', f.read())[0]
     except Exception:
       pass
+
     dt = time.monotonic() - self.last_watchdog_time / 1e9
-    # 添加重启计数和冷却时间
-    if not hasattr(self, 'restart_count'):
-      self.restart_count = 0
-      self.last_restart_time = 0
-    current_time = time.monotonic()
+
     if dt > self.watchdog_max_dt:
       if self.watchdog_seen and ENABLE_WATCHDOG:
-        # 检查重启频率
-        if current_time - self.last_restart_time > 300:  # 5分钟重置计数
-          self.restart_count = 0
-
-        self.restart_count += 1
-        if self.restart_count > 3:  # 如果5分钟内重启超过3次
-          cloudlog.error(f"Process {self.name} restarting too frequently, waiting for cool down")
-          time.sleep(60)  # 等待1分钟再重启
-          self.restart_count = 0
-
-        self.last_restart_time = current_time
         cloudlog.error(f"Watchdog timeout for {self.name} (exitcode {self.proc.exitcode}) restarting ({started=})")
         self.restart()
     else:
       self.watchdog_seen = True
-
-  def restart(self) -> None:
-    if self.proc is not None:
-      self.stop()
-    self.start()
 
   def stop(self, retry: bool = True, block: bool = True, sig: Optional[signal.Signals] = None) -> Optional[int]:
     if self.proc is None:

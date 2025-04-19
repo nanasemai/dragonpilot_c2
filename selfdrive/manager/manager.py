@@ -18,7 +18,7 @@ from openpilot.selfdrive.boardd.set_time import set_time
 from openpilot.system.hardware import HARDWARE, PC
 from openpilot.selfdrive.manager.helpers import unblock_stdout, write_onroad_params
 from openpilot.selfdrive.manager.process import ensure_running
-from openpilot.selfdrive.manager.process_config import managed_processes,ensure_dependencies
+from openpilot.selfdrive.manager.process_config import managed_processes
 from openpilot.selfdrive.athena.registration import register, UNREGISTERED_DONGLE_ID
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.version import is_dirty, get_commit, get_version, get_origin, get_short_branch, \
@@ -98,12 +98,12 @@ def manager_init() -> None:
     ("dp_device_mode", "1"),  # 设备运行模式: 0-节能 1-普通 2-性能
     ("dp_show_date_time", "1"),    # 是否显示时间: 0-不显示 1-显示
     # 行车记录仪相关参数
-    ("dp_dashcam_quality", "medium"),  # 视频质量：低/中/高
+    ("dp_dashcam_quality", "1"),  # 视频质量：0=低 1=中 2=高
     ("dp_dashcam_duration", "180"),    # 单个视频时长（秒）
     ("dp_dashcam_kept_hours", "15"),   # 视频保留时长（小时）
     ("dp_torqued_override", "0"),
-    ("dp_torque_lat_accel_factor", "250"),
-    ("dp_torque_friction", "1"),
+    ("dp_torque_lat_accel_factor", "140"),#1.4
+    ("dp_torque_friction", "220"),#0.22
     ("dp_gpxd", "0"),
     ("dp_fleet_fileserv", "0"),
     ("dp_dev_ui_info", "0"),
@@ -111,6 +111,13 @@ def manager_init() -> None:
     ("dp_device_display_off_mode", "0"),
     # 添加换道中止检查参数
     ("dp_lat_lane_change_abort_check", "0"),
+    ("dp_lateral_camera_offset", "-6"),#单位厘米
+    ("dp_lateral_path_offset", "0"),#单位厘米
+    ("dp_lateral_torque_kp", "100"),  # 1.0
+    ("dp_lateral_torque_ki", "10"),  # 0.1
+    ("dp_disable_gps", "0"),
+	("dp_lat_use_siglin", "0"),
+    ("dp_device_go_off_road", "0"),  # 添加离线模式参数
   ]
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))
@@ -124,13 +131,6 @@ def manager_init() -> None:
   for k, v in default_params:
     if params.get(k) is None:
       params.put(k, v)
-
-  # is this dashcam?
-  if os.getenv("PASSIVE") is not None:
-    params.put_bool("Passive", bool(int(os.getenv("PASSIVE", "0"))))
-
-  if params.get("Passive") is None:
-    raise Exception("Passive must be set to continue")
 
   # Create folders needed for msgq
   try:
@@ -176,30 +176,10 @@ def manager_init() -> None:
                        dirty=is_dirty(),
                        device=HARDWARE.get_device_type())
 
-def manager_prepare() -> None:
-  # 按优先级对进程排序
-  priority_processes = {
-    'critical': ['boardd', 'ubloxd', 'gpsd'],  # 系统关键进程
-    'high': ['controlsd', 'plannerd', 'radard'],  # 控制相关进程
-    'medium': ['modeld', 'locationd', 'paramsd'],  # 模型和定位进程
-    'low': ['uploader', 'logmessaged', 'logcatd']  # 日志和上传进程
-  }
-
-  prepared = set()
-  # 按优先级准备进程
-  for priority in ['critical', 'high', 'medium', 'low']:
-    for proc_name in priority_processes[priority]:
-      if proc_name in managed_processes and proc_name not in prepared:
-        # 确保依赖进程已准备
-        if ensure_dependencies(proc_name, prepared):
-          managed_processes[proc_name].prepare()
-          prepared.add(proc_name)
-
-  # 准备其他未分类进程
+  # preimport all processes
   for p in managed_processes.values():
-    if p.name not in prepared:
-      managed_processes[p.name].prepare()
-      prepared.add(p.name)
+    p.prepare()
+
 
 def manager_cleanup() -> None:
   # send signals to kill all procs
@@ -211,6 +191,7 @@ def manager_cleanup() -> None:
     p.stop(block=True)
 
   cloudlog.info("everything is dead")
+
 
 def manager_thread() -> None:
   cloudlog.bind(daemon="manager")
@@ -243,13 +224,16 @@ def manager_thread() -> None:
   ignore += [x for x in os.getenv("BLOCK", "").split(",") if len(x) > 0]
 
   if not params.get_bool("dp_mapd"):
-    ignore += ["mapd"]
+    ignore += ["mapd", "gpxd"]
 
   if not params.get_bool("dp_gpxd"):
     ignore += ["gpxd"]
 
   if params.get_bool("dp_no_gps_ctrl"):
     ignore += ["ubloxd", "gpx_uploader", "gpxd", "mapd"]
+
+  if params.get_bool("dp_disable_gps"):
+    ignore += ["ubloxd", "gpx_uploader", "gpxd", "mapd"]  
 
   if not params.get_bool("dp_fleet_fileserv"):
     ignore += ["fleet_manager"]
@@ -270,7 +254,7 @@ def manager_thread() -> None:
   #add by nana
   ignore += ["manage_athenad"]
 
-  sm = messaging.SubMaster(['deviceState', 'carParams'], poll='deviceState')
+  sm = messaging.SubMaster(['deviceState', 'carParams'], poll=['deviceState'])
   pm = messaging.PubMaster(['managerState'])
 
   last_network_type = log.DeviceState.NetworkType.none
@@ -281,7 +265,7 @@ def manager_thread() -> None:
   started_prev = False
   last_time_save = 0  # 添加时间保存计数器
   while True:
-    sm.update(1000)
+    sm.update()
 
     started = sm['deviceState'].started
     current_time = int(time.time())
@@ -338,16 +322,16 @@ def manager_thread() -> None:
 
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
                        for p in managed_processes.values() if p.proc)
-                       
+
     last_print_time = 0
-    PRINT_INTERVAL = 5  # 每5秒打印一次
-    
+    PRINT_INTERVAL = 6  # 每6秒打印一次
+
     # 添加时间间隔检查
     current_time = time.time()
     if current_time - last_print_time >= PRINT_INTERVAL:
         print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {running}")
         last_print_time = current_time
-        
+
     #cloudlog.debug(running)
 
     # send managerState
@@ -367,6 +351,7 @@ def manager_thread() -> None:
 
     if shutdown:
       break
+
 
 def main() -> None:
   manager_init()
@@ -395,6 +380,7 @@ def main() -> None:
     cloudlog.warning("shutdown")
     HARDWARE.shutdown()
 
+
 def get_support_car_list():
   cars = dict({"cars": []})
   list = []
@@ -407,6 +393,7 @@ def get_support_car_list():
       list.append(name)
   cars["cars"] = sorted(list)
   return json.dumps(cars)
+
 
 if __name__ == "__main__":
   unblock_stdout()

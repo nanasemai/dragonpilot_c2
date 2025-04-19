@@ -10,17 +10,20 @@ from openpilot.common.numpy_fast import interp
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.hardware import EON
+from openpilot.common.params import Params
 
 # 轨迹预测点数量
 TRAJECTORY_SIZE = 33
 # camera offset is meters from center car to camera
 # model path is in the frame of the camera
+# 根据设备类型设置相机和路径偏移值
+# EON是旧款设备，使用不同的偏移配置
 if EON:
-  CAMERA_OFFSET = -0.06
-  PATH_OFFSET = 0.0
+  CAMERA_OFFSET = -0.06  # EON设备相机偏移量为-6厘米(向左)
+  PATH_OFFSET = 0.0      # EON设备路径偏移量为0
 else:
-  CAMERA_OFFSET = 0.04
-  PATH_OFFSET = 0.04
+  CAMERA_OFFSET = 0.04   # C2/C3设备相机偏移量为4厘米(向右)
+  PATH_OFFSET = 0.04     # C2/C3设备路径偏移量为4厘米(向右)
 
 
 class LanePlanner:
@@ -43,8 +46,10 @@ class LanePlanner:
     self.l_lane_change_prob = 0.
     self.r_lane_change_prob = 0.
 
-    self.camera_offset = CAMERA_OFFSET
-    self.path_offset = PATH_OFFSET
+    # 初始化相机偏移量，使用默认值(C2为0.04米，EON为-0.06米)
+    self.camera_offset = int(Params().get("dp_lateral_camera_offset", encoding="utf-8"))*0.01 #CAMERA_OFFSET
+    # 初始化路径偏移量，使用默认值(C2为0.04米，EON为0米)
+    self.path_offset = int(Params().get("dp_lateral_path_offset", encoding="utf-8"))*0.01 #PATH_OFFSET
 
   def parse_model(self, md):
     lane_lines = md.laneLines

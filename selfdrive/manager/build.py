@@ -77,22 +77,17 @@ def build(spinner: Spinner, dirty: bool = False, minimal: bool = False) -> None:
       with TextWindow("openpilot failed to build\n \n" + error_s) as t:
         t.wait_for_exit()
     exit(1)
-  # 优化缓存清理策略
-  def clean_cache():
-    cache_files = [f for f in CACHE_DIR.rglob('*') if f.is_file()]
-    cache_files.sort(key=lambda f: f.stat().st_mtime)
-    cache_size = sum(f.stat().st_size for f in cache_files)
 
-    # 保留最近24小时内的缓存
-    current_time = time.time()
-    for f in cache_files:
-      if cache_size < MAX_CACHE_SIZE:
-        break
+  # enforce max cache size
+  cache_files = [f for f in CACHE_DIR.rglob('*') if f.is_file()]
+  cache_files.sort(key=lambda f: f.stat().st_mtime)
+  cache_size = sum(f.stat().st_size for f in cache_files)
+  for f in cache_files:
+    if cache_size < MAX_CACHE_SIZE:
+      break
+    cache_size -= f.stat().st_size
+    f.unlink()
 
-      # 检查文件最后修改时间
-      if current_time - f.stat().st_mtime > 86400:  # 24小时
-        cache_size -= f.stat().st_size
-        f.unlink()
 
 if __name__ == "__main__" and not PREBUILT:
   spinner = Spinner()

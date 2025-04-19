@@ -17,15 +17,18 @@ function two_init {
   mount -o remount,rw /system
   # font installer
   if [ -f /EON ]; then
-    if [ ! -f /system/fonts/NotoSansCJKtc-Regular.otf ]; then
-      rm -fr /system/fonts/NotoSansTC*.otf
-      rm -fr /system/fonts/NotoSansSC*.otf
-      rm -fr /system/fonts/NotoSansKR*.otf
-      rm -fr /system/fonts/NotoSansJP*.otf
-      cp -rf /data/openpilot/selfdrive/assets/fonts/NotoSansCJKtc-* /system/fonts/
-      cp -rf /data/openpilot/selfdrive/assets/fonts/fonts.xml /system/etc/fonts.xml
-      chmod 644 /system/etc/fonts.xml
-      chmod 644 /system/fonts/NotoSansCJKtc-*
+    # 检查字体文件是否存在，只有在缺失时才在后台进行安装
+    if [ ! -f /system/fonts/NotoSansCJKtc-Regular.otf ] || [ ! -f /system/etc/fonts.xml ]; then
+      (
+        rm -fr /system/fonts/NotoSansTC*.otf
+        rm -fr /system/fonts/NotoSansSC*.otf
+        rm -fr /system/fonts/NotoSansKR*.otf
+        rm -fr /system/fonts/NotoSansJP*.otf
+        cp -rf /data/openpilot/selfdrive/assets/fonts/NotoSansCJKtc-* /system/fonts/
+        cp -rf /data/openpilot/selfdrive/assets/fonts/fonts.xml /system/etc/fonts.xml
+        chmod 644 /system/etc/fonts.xml
+        chmod 644 /system/fonts/NotoSansCJKtc-*
+      ) &
     fi
   fi
 
@@ -237,7 +240,8 @@ function two_init {
   LD_LIBRARY_PATH="" content insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:1
 
   # disable bluetooth
-  service call bluetooth_manager 8
+  # disable bluetooth
+  (service call bluetooth_manager 8) &
 
   # wifi scan
   wpa_cli IFNAME=wlan0 SCAN
@@ -324,12 +328,12 @@ function two_init {
   fi
 
   # Check for NEOS update
-  if [ -f /LEECO ] && [ $(< /VERSION) != "$REQUIRED_NEOS_VERSION" ]; then
-    echo "Installing NEOS update"
+  if [ -f /LEECO ] && [ -f /VERSION ] && [ $(< /VERSION) != "$REQUIRED_NEOS_VERSION" ]; then
+    echo "Installing NEOS update" > /dev/null  # 静默输出
     NEOS_PY="$DIR/system/hardware/eon/neos.py"
     MANIFEST="$DIR/system/hardware/eon/neos.json"
-    $NEOS_PY --swap-if-ready $MANIFEST
-    $DIR/system/hardware/eon/updater $NEOS_PY $MANIFEST
+    $NEOS_PY --swap-if-ready $MANIFEST &
+    $DIR/system/hardware/eon/updater $NEOS_PY $MANIFEST &
   fi
 
   # One-time fix for a subset of OP3T with gyro orientation offsets.

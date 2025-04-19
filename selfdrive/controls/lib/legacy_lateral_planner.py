@@ -14,6 +14,7 @@ from openpilot.common.conversions import Conversions as CV
 
 # 不同车型的转向率成本配置
 STEER_RATE_COST = {
+  "byd": 1.,
   "chrysler": 0.7,    # 克莱斯勒：中等偏低的转向灵敏度
   "ford": 1.,         # 福特：标准转向灵敏度
   "gm": 1.,          # 通用：标准转向灵敏度

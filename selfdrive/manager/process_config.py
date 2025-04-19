@@ -94,6 +94,7 @@ procs = [
   PythonProcess("rtshield", "selfdrive.rtshield", only_onroad, enabled=EON),
   PythonProcess("shutdownd", "system.hardware.eon.shutdownd", only_onroad, enabled=EON),
   PythonProcess("androidd", "system.hardware.eon.androidd", always_run, enabled=EON),
+
   # mapd
   PythonProcess("mapd", "selfdrive.mapd.mapd", only_onroad),
   # dashcam
@@ -105,20 +106,3 @@ procs = [
 ]
 
 managed_processes = {p.name: p for p in procs}
-
-# 添加进程依赖关系
-PROCESS_DEPENDENCIES = {
-  'controlsd': ['boardd', 'plannerd', 'radard'],
-  'plannerd': ['locationd'],
-  'radard': ['modeld'],
-  'mapd': ['locationd', 'ubloxd']
-}
-
-def ensure_dependencies(proc_name: str, running_procs: set) -> bool:
-  if proc_name not in PROCESS_DEPENDENCIES:
-    return True
-
-  for dep in PROCESS_DEPENDENCIES[proc_name]:
-    if dep not in running_procs:
-      return False
-  return True
