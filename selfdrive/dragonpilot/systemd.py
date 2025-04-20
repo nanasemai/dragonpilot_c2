@@ -69,7 +69,11 @@ def dashcam_thread():
 
       # 更新可用空间
       if sm.updated['deviceState']:
-        free_space = sm['deviceState'].freeSpacePercent
+          free_space = sm['deviceState'].freeSpacePercent
+          # 只有当空间变化时才触发清理
+          dashcam.run(started=started, free_space=free_space)
+          if free_space < dashcam.DASHCAM_FREESPACE_LIMIT:
+              dashcam._clean_up_space()
 
       # 检查配置变更
       new_enabled = params.get_bool("dp_on_road_dashcam")

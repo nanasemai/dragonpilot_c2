@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 import datetime
 import subprocess
@@ -45,15 +46,11 @@ class Dashcamd:
     self.current_process = None
     self.session_id = int(time.monotonic() * 1000)
     self.file_counter = 0
-
-    Path(DASHCAM_VIDEOS_PATH).mkdir(parents=True, exist_ok=True)
-
-    # 添加会话信息到日志上下文
-    cloudlog.bind(session_id=self.session_id)
-
-    # 更新配置
-    if config:
-      self.update_config(config)
+    self.cleanup_lock = threading.Lock()
+    self.last_clean_time = 0
+    self.CLEAN_INTERVAL = 3600  # 1小时强制清理一次
+    self.video_dir = DASHCAM_VIDEOS_PATH
+    Path(self.video_dir).mkdir(parents=True, exist_ok=True)  # 确保目录存在
 
   def update_config(self, config):
       self.config.update(config)
@@ -80,7 +77,7 @@ class Dashcamd:
     self.DASHCAM_DURATION = max(60, min(180, self.config['duration']))
     self.DASHCAM_BIT_RATES = self.quality_settings["bitrate"]
     self.DASHCAM_MAX_SIZE_PER_FILE = self.DASHCAM_BIT_RATES / 8 * self.DASHCAM_DURATION
-    self.DASHCAM_FREESPACE_LIMIT = 15
+    self.DASHCAM_FREESPACE_LIMIT = 30  # 改为30%空间预留
     kept_hours = max(1, min(72, self.config['kept_hours']))  # 限制在1-72小时之间
     self.DASHCAM_KEPT_MIN_SIZE = self.DASHCAM_MAX_SIZE_PER_FILE * (kept_hours * 60 * 60 / self.DASHCAM_DURATION)
 
@@ -108,7 +105,7 @@ class Dashcamd:
 
   def _stop_current_recording(self):
       try:
-        if self.current_process:
+        if self.current_process and self.current_process.poll() is None:  # 添加进程状态检查
           self.current_process.terminate()
           try:
             self.current_process.wait(timeout=2)
@@ -136,7 +133,7 @@ class Dashcamd:
       quality_name = self.quality_settings.get('name', self.config['quality'])
       file_name = f"dashcam_{now.strftime('%Y%m%d_%H%M%S')}_{self.session_id}_f{self.file_counter:04d}_{quality_name}"
       self.file_counter += 1
-      full_path = os.path.join(DASHCAM_VIDEOS_PATH, f"{file_name}.mp4")
+      full_path = os.path.join(self.video_dir, f"{file_name}.mp4")  # 使用self.video_dir替代DASHCAM_VIDEOS_PATH
 
       # 构建录制命令
       cmd = ["screenrecord", "--bit-rate", str(self.DASHCAM_BIT_RATES),
@@ -159,13 +156,10 @@ class Dashcamd:
       #cloudlog.info(f"开始录制文件: {full_path}, {quality_info}, 时长: {self.DASHCAM_DURATION}秒")
 
       # 启动监控线程，等待当前录制完成后继续下一个
-      import threading
       threading.Thread(target=self._wait_and_record_next, daemon=True).start()
 
     except Exception as e:
       cloudlog.error(f"开始录制出错: {str(e)}")
-      # 如果出错，稍后重试
-      import threading
       threading.Timer(5.0, self._record_next_file).start()
 
   def _wait_and_record_next(self):
@@ -178,56 +172,56 @@ class Dashcamd:
       self._record_next_file()
 
   def _clean_up_space(self):
-    """清理空间，删除最旧的文件"""
-    try:
-      # 检查是否需要清理空间
-      if (self.free_space < self.DASHCAM_FREESPACE_LIMIT) or (self._get_used_space() > self.DASHCAM_KEPT_MIN_SIZE):
-        files = []
-        for f in os.listdir(DASHCAM_VIDEOS_PATH):
-          if not f.endswith('.mp4'):
-            continue
-          full_path = os.path.join(DASHCAM_VIDEOS_PATH, f)
-          if not os.path.isfile(full_path) or os.path.getsize(full_path) == 0:
-            continue
-
+      with self.cleanup_lock:
           try:
-            parts = f.split('_')
-            if len(parts) >= 6:  # dashcam_时间_sessionID_f序号_质量
-              try:
-                session_id = int(parts[2])  # 会话ID
-                file_num_str = parts[3]
-                file_num = int(file_num_str[1:]) if file_num_str.startswith('f') else int(file_num_str)
-                quality = parts[4]
-                
-                # 验证质量名称
-                if quality not in QUALITY_PRESETS:
-                    continue  # 跳过无效质量名称的文件
-                    
-                files.append((full_path, session_id, file_num))
-              except (ValueError, IndexError):
-                # 如果解析失败，使用文件修改时间作为排序依据
-                files.append((full_path, 0, os.path.getmtime(full_path)))
-          except Exception:
-            files.append((full_path, 0, os.path.getmtime(full_path)))
+              # 添加定期清理条件
+              need_clean = (self.free_space < self.DASHCAM_FREESPACE_LIMIT or 
+                           self._get_used_space() > self.DASHCAM_KEPT_MIN_SIZE or
+                           time.time() - self.last_clean_time > self.CLEAN_INTERVAL)
+              
+              if need_clean:
+                  files = []
+                  for f in os.listdir(self.video_dir):  # 改为self.video_dir
+                      full_path = os.path.join(self.video_dir, f)  # 改为self.video_dir
+                      if not os.path.isfile(full_path):
+                          continue
 
-        # 按会话ID和文件编号排序，删除最旧的
-        if files:
-          files.sort(key=lambda x: (x[1], x[2]))
-          try:
-            os.remove(files[0][0])
-            #cloudlog.info(f"已删除旧文件: {files[0][0]}")
+                      try:
+                          # 一次性获取文件大小和修改时间
+                          stat = os.stat(full_path)
+                          if stat.st_size == 0:  # 空文件直接删除
+                              os.remove(full_path)
+                              continue
+                          files.append((full_path, stat.st_mtime, stat.st_size))  # 保存路径、修改时间和大小
+                      except Exception:
+                          continue
+
+                  # 按修改时间排序，删除最旧的
+                  if files:
+                      files.sort(key=lambda x: x[1])  # 按修改时间排序
+                      space_needed = self.DASHCAM_MAX_SIZE_PER_FILE * 5
+                      space_freed = 0
+                      for file_info in files:
+                          if space_freed >= space_needed:
+                              break
+                          try:
+                              os.remove(file_info[0])
+                              space_freed += file_info[2]  # 使用预存的文件大小
+                              cloudlog.info(f"已删除旧文件: {file_info[0]}") 
+                          except Exception as e:
+                              cloudlog.error(f"删除文件失败: {str(e)}")
+                              continue
           except Exception as e:
-            cloudlog.error(f"删除文件失败: {str(e)}")
-    except Exception as e:
-      cloudlog.error(f"清理空间出错: {str(e)}")
+              cloudlog.error(f"清理空间出错: {str(e)}")
+      self.last_clean_time = time.time()
 
   def _get_used_space(self):
     """获取已使用的空间大小"""
     try:
       return sum(
-        os.path.getsize(os.path.join(DASHCAM_VIDEOS_PATH, f))
-        for f in os.listdir(DASHCAM_VIDEOS_PATH)
-        if os.path.isfile(os.path.join(DASHCAM_VIDEOS_PATH, f))
+        os.path.getsize(os.path.join(self.video_dir, f))  # 改为self.video_dir
+        for f in os.listdir(self.video_dir)  # 改为self.video_dir
+        if os.path.isfile(os.path.join(self.video_dir, f))  # 改为self.video_dir
       )
     except Exception as e:
       cloudlog.error(f"计算空间使用出错: {str(e)}")
@@ -253,3 +247,15 @@ class Dashcamd:
       self.stop_recording()
       time.sleep(1)  # 等待进程完全停止
       self.start_recording(self.free_space)
+
+
+  def cleanup(self):
+      """清理所有资源"""
+      self.stop_recording()
+      if hasattr(self, 'cleanup_lock'):
+          try:
+              self.cleanup_lock.acquire()
+              # 可以添加其他资源清理逻辑
+          finally:
+              self.cleanup_lock.release()
+              del self.cleanup_lock
