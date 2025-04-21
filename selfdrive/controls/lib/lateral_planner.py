@@ -48,7 +48,7 @@ class LateralPlanner:
     self._d_path_w_lines_xyz = np.zeros((TRAJECTORY_SIZE, 3))
     self._dp_lat_lane_priority_mode_speed_based = int(self.params.get("dp_lat_lane_priority_mode_speed_based", encoding="utf-8")) if self._dp_lat_lane_priority_mode else 0
     self.param_read_counter = 0
-    self._dp_lat_lane_change_assist_speed = int(self.params.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.MPH_TO_MS
+    self._dp_lat_lane_change_assist_speed = int(self.params.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.KPH_TO_MS
 
     # Vehicle model parameters used to calculate lateral movement of car
     self.factor1 = CP.wheelbase - CP.centerToFront

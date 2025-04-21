@@ -127,7 +127,7 @@ class Controls:
     self._dp_long_missing_lead_warning = self.params.get_bool("dp_long_missing_lead_warning")
     self._dp_long_missing_lead_count = 0
     self._dp_long_missing_lead_prev = False
-    self._dp_lat_lane_change_assist_speed = int(self.params.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.MPH_TO_MS
+    self._dp_lat_lane_change_assist_speed = int(self.params.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.KPH_TO_MS
     self._dp_lateral_road_edge_detected = self.params.get_bool("dp_lateral_road_edge_detected")
     self._dp_road_edge_timer = 0.0  # 添加计时器变量
     # 添加ALKA力矩检查开关

@@ -51,7 +51,7 @@ class LateralPlanner:
     self._dp_lat_lane_priority_mode_active = False
     self._dp_lat_lane_priority_mode_active_prev = False
     # 换道辅助速度阈值
-    self._dp_lat_lane_change_assist_speed = int(self.params.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.MPH_TO_MS
+    self._dp_lat_lane_change_assist_speed = int(self.params.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.KPH_TO_MS
     self.last_cloudlog_t = 0
     # 获取车型特定的转向率成本
     try:
