@@ -50,6 +50,11 @@ class Dashcamd:
     self.last_clean_time = 0
     self.CLEAN_INTERVAL = 3600  # 1小时强制清理一次
     self.video_dir = DASHCAM_VIDEOS_PATH
+
+    # 初始化缺失的属性
+    self.quality_settings = QUALITY_PRESETS["medium"]  # 默认中等质量
+    self._update_storage_limits()  # 初始化存储限制相关属性
+
     Path(self.video_dir).mkdir(parents=True, exist_ok=True)  # 确保目录存在
 
   def update_config(self, config):
