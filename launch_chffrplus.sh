@@ -188,27 +188,16 @@ function two_init {
   # 温控设置
   case $device_mode in
     "0") # 节能模式
-      # 标准温控设置
-      if [ -w /sys/class/thermal/thermal_zone0/trip_point_0_temp ]; then
-        echo 82000 > /sys/class/thermal/thermal_zone0/trip_point_0_temp 2>/dev/null || true
-        echo 92000 > /sys/class/thermal/thermal_zone0/trip_point_1_temp 2>/dev/null || true
-      fi
       # 限制最大 CPU 频率
       echo 1401600 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
       echo 1401600 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
       ;;
     "2") # 性能模式
-      # 略微提升温度阈值
-      echo 84000 > /sys/class/thermal/thermal_zone0/trip_point_0_temp
-      echo 94000 > /sys/class/thermal/thermal_zone0/trip_point_1_temp
       # 提高最大 CPU 频率
       echo 2016000 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
       echo 2016000 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
       ;;
     *) # 普通模式（默认）
-      # 标准温控设置
-      echo 82000 > /sys/class/thermal/thermal_zone0/trip_point_0_temp
-      echo 92000 > /sys/class/thermal/thermal_zone0/trip_point_1_temp
       # 默认 CPU 频率
       echo 1804800 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
       echo 1804800 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
