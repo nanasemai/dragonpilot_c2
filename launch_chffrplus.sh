@@ -189,8 +189,10 @@ function two_init {
   case $device_mode in
     "0") # 节能模式
       # 标准温控设置
-      echo 82000 > /sys/class/thermal/thermal_zone0/trip_point_0_temp
-      echo 92000 > /sys/class/thermal/thermal_zone0/trip_point_1_temp
+      if [ -w /sys/class/thermal/thermal_zone0/trip_point_0_temp ]; then
+        echo 82000 > /sys/class/thermal/thermal_zone0/trip_point_0_temp 2>/dev/null || true
+        echo 92000 > /sys/class/thermal/thermal_zone0/trip_point_1_temp 2>/dev/null || true
+      fi
       # 限制最大 CPU 频率
       echo 1401600 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
       echo 1401600 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
@@ -233,9 +235,13 @@ function two_init {
   # GPU and camera get cpu 2
   CAM_IRQS="177 178 179 180 181 182 183 184 185 186 192"
   for irq in $CAM_IRQS; do
-    echo 2 > /proc/irq/$irq/smp_affinity_list
+    if [ -f "/proc/irq/$irq/smp_affinity_list" ]; then
+      echo 2 > /proc/irq/$irq/smp_affinity_list 2>/dev/null || true
+    fi
   done
-  echo 2 > /proc/irq/193/smp_affinity_list # GPU
+  if [ -f "/proc/irq/193/smp_affinity_list" ]; then
+    echo 2 > /proc/irq/193/smp_affinity_list 2>/dev/null || true
+  fi
 
   # give GPU threads RT priority
   for pid in $(pgrep "kgsl"); do
