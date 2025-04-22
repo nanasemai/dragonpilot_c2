@@ -57,7 +57,7 @@ class DesireHelper:
   def update(self, carstate, lateral_active, lane_change_prob,model_data=None):
 
     self._dp_lateral_road_edge_detected = self.param_s.get_bool("dp_lateral_road_edge_detected")
-    self._dp_lat_lane_change_assist_speed = int(self.param_s.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.MPH_TO_MS
+    self._dp_lat_lane_change_assist_speed = int(self.param_s.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.KPH_TO_MS
     self._dp_lat_lane_change_abort_check = self.param_s.get_bool("dp_lat_lane_change_abort_check")
 
     v_ego = carstate.vEgo
