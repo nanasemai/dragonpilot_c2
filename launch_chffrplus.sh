@@ -58,7 +58,11 @@ function two_init {
   # 获取设备运行模式，默认为普通模式
   device_mode="1"
   if [ -f /data/params/d/dp_device_mode ]; then
-    device_mode=$(cat /data/params/d/dp_device_mode)
+    mode=$(cat /data/params/d/dp_device_mode)
+    case $mode in
+      "0"|"1"|"2") device_mode=$mode ;;
+      *) device_mode="1" ;;
+    esac
   fi
 
   # set IO scheduler
@@ -123,8 +127,12 @@ function two_init {
   esac
 
   # mask off 2-3 from RPS and XPS - Receive/Transmit Packet Steering
-  echo 3 | tee  /sys/class/net/*/queues/*/rps_cpus
-  echo 3 | tee  /sys/class/net/*/queues/*/xps_cpus
+  for f in /sys/class/net/*/queues/*/rps_cpus; do
+    [ -f "$f" ] && echo 3 > "$f" 2>/dev/null || true
+  done
+  for f in /sys/class/net/*/queues/*/xps_cpus; do
+    [ -f "$f" ] && echo 3 > "$f" 2>/dev/null || true
+  done
 
   # *** set up governors ***
   case $device_mode in
@@ -144,6 +152,9 @@ function two_init {
       echo "performance" > /sys/class/devfreq/soc:qcom,cpubw/governor
       if [ -f /ONEPLUS ]; then
         echo 1593600 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+        # 增加CPU频率设置
+        echo 2016000 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+        echo 2016000 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
       else
         echo 1190400 > /sys/class/devfreq/soc:qcom,m4m/max_freq
       fi
