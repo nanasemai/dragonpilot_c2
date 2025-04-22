@@ -137,7 +137,9 @@ function two_init {
   # *** set up governors ***
   case $device_mode in
     "0") # 节能模式
-      echo "powersave" > /sys/class/devfreq/soc:qcom,cpubw/governor
+      for dev in /sys/class/devfreq/soc:qcom,*; do
+        [ -f "$dev/governor" ] && echo "powersave" > "$dev/governor"
+      done
       if [ -f /ONEPLUS ]; then
         echo 902400 > /sys/class/devfreq/soc:qcom,m4m/max_freq
       else
@@ -149,7 +151,9 @@ function two_init {
       echo "powersave" > /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor
       ;;
     "2") # 性能模式
-      echo "performance" > /sys/class/devfreq/soc:qcom,cpubw/governor
+      for dev in /sys/class/devfreq/soc:qcom,*; do
+        [ -f "$dev/governor" ] && echo "performance" > "$dev/governor"
+      done
       if [ -f /ONEPLUS ]; then
         echo 1593600 > /sys/class/devfreq/soc:qcom,m4m/max_freq
         # 增加CPU频率设置
@@ -165,6 +169,9 @@ function two_init {
       ;;
     *) # 普通模式（默认）
       echo "performance" > /sys/class/devfreq/soc:qcom,cpubw/governor
+      for dev in /sys/class/devfreq/soc:qcom,*; do
+        [ -f "$dev/governor" ] && echo "performance" > "$dev/governor"
+      done
       if [ -f /ONEPLUS ]; then
         echo 1363200 > /sys/class/devfreq/soc:qcom,m4m/max_freq
       else
@@ -202,16 +209,34 @@ function two_init {
       # 限制最大 CPU 频率
       echo 1401600 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
       echo 1401600 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
+      # 设置温控阈值
+      for zone in /sys/class/thermal/thermal_zone*; do
+        if [ -f "$zone/trip_point_0_temp" ]; then
+          echo 85000 > "$zone/trip_point_0_temp" 2>/dev/null || true
+        fi
+      done
       ;;
     "2") # 性能模式
       # 提高最大 CPU 频率
       echo 2016000 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
       echo 2016000 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
+      # 设置温控阈值
+      for zone in /sys/class/thermal/thermal_zone*; do
+        if [ -f "$zone/trip_point_0_temp" ]; then
+          echo 85000 > "$zone/trip_point_0_temp" 2>/dev/null || true
+        fi
+      done
       ;;
     *) # 普通模式（默认）
       # 默认 CPU 频率
       echo 1804800 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
       echo 1804800 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
+      # 设置温控阈值
+      for zone in /sys/class/thermal/thermal_zone*; do
+        if [ -f "$zone/trip_point_0_temp" ]; then
+          echo 85000 > "$zone/trip_point_0_temp" 2>/dev/null || true
+        fi
+      done
       ;;
   esac
 
@@ -251,7 +276,6 @@ function two_init {
   # the flippening!
   LD_LIBRARY_PATH="" content insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:1
 
-  # disable bluetooth
   # disable bluetooth
   (service call bluetooth_manager 8) &
 
