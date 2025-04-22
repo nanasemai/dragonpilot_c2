@@ -66,19 +66,25 @@ function two_init {
     "0") # 节能模式
       setprop sys.io.scheduler cfq
       for f in /sys/block/*/queue/scheduler; do
-        echo cfq > $f
+        if grep -q "cfq" $f; then
+          echo cfq > $f 2>/dev/null || true
+        fi
       done
       ;;
     "2") # 性能模式
       setprop sys.io.scheduler deadline
       for f in /sys/block/*/queue/scheduler; do
-        echo deadline > $f
+        if grep -q "deadline" $f; then
+          echo deadline > $f 2>/dev/null || true
+        fi
       done
       ;;
     *) # 普通模式（默认）
       setprop sys.io.scheduler noop
       for f in /sys/block/*/queue/scheduler; do
-        echo noop > $f
+        if grep -q "noop" $f; then
+          echo noop > $f 2>/dev/null || true
+        fi
       done
       ;;
   esac
