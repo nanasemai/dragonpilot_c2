@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import math
-
 import numpy as np
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -15,9 +14,10 @@ from openpilot.selfdrive.controls.lib.legacy_longitudinal_mpc_lib.long_mpc impor
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from openpilot.selfdrive.controls.lib.vision_turn_controller import VisionTurnController
 from openpilot.selfdrive.legacy_modeld.constants import T_IDXS
-
 import cereal.messaging as messaging
-from cereal import log
+from cereal import log,car
+from openpilot.selfdrive.controls.lib.acm import ACM
+from openpilot.selfdrive.controls.lib.events import Events
 
 # MPC控制器基础参数
 LON_MPC_STEP = 0.2                   # MPC预测第一步时间间隔(s)，降低以提高控制精度
@@ -41,6 +41,7 @@ _A_TOTAL_MAX_V = [1.5, 2.0, 2.5]     # 不同速度下的最大合成加速度(m
                                      # 高速(>30m/s): 2.5 m/s²
 _A_TOTAL_MAX_BP = [15., 30., 45.]    # 转弯工况加速度切换点速度阈值(m/s)
 
+EventName = car.CarEvent.EventName
 
 def get_max_accel(v_ego):
   return interp(v_ego, A_CRUISE_MAX_BP, A_CRUISE_MAX_VALS)
@@ -59,6 +60,24 @@ def limit_accel_in_turns(v_ego, angle_steers, a_target, CP):
   return [a_target[0], min(a_target[1], a_x_allowed)]
 
 
+def get_accel_from_plan(speeds, accels, action_t=DT_MDL, vEgoStopping=0.05):
+  if len(speeds) == CONTROL_N:
+    v_now = speeds[0]
+    a_now = accels[0]
+
+    v_target = np.interp(action_t, T_IDXS[:CONTROL_N], speeds)
+    a_target = 2 * (v_target - v_now) / (action_t) - a_now
+    # 计算1秒后的目标速度，用于判断是否需要停车
+    v_target_1sec = np.interp(action_t + 1.0, T_IDXS[:CONTROL_N], speeds) if len(speeds) == CONTROL_N else 0.0
+  else:
+    v_target = 0.0
+    v_target_1sec = 0.0
+    a_target = 0.0
+  should_stop = (v_target < vEgoStopping and
+                 v_target_1sec < vEgoStopping)
+  return a_target, should_stop
+
+
 class LongitudinalPlanner:
   """纵向运动规划器
   主要功能：
@@ -74,6 +93,15 @@ class LongitudinalPlanner:
     - init_v: 初始速度
     - init_a: 初始加速度
     """
+    self.events = Events()  # 初始化事件管理器
+    self.acm = ACM()
+    self.acm_enabled = False
+    self.acm_param = False
+    self.acm_downhill_param = False
+    self.prev_accel_clip = [A_CRUISE_MIN, get_max_accel(0.0)]
+    self.output_should_stop = False
+    self.output_a_target = 0.0
+
     # mapd
     self.cruise_source = 'cruise'
     # 控制器初始化
@@ -101,6 +129,12 @@ class LongitudinalPlanner:
     self.dp_long_use_df_tune_active = False
     self.dp_long_use_krkeegen_tune = False
     self.dp_long_use_krkeegen_tune_active = False
+    # 停车判定
+    self.lead_start_alert = False  # 前车起步提醒标志
+    self.lead_stopped_time = 0     # 前车停止时间
+    self.lead_started = False      # 前车起步状态
+    self.lead_start_threshold = 1.0  # 默认起步速度阈值(m/s)
+    self.lead_stop_threshold = 2.0   # 默认停止时间阈值(s)
 
   def read_param(self):
     try:
@@ -109,6 +143,13 @@ class LongitudinalPlanner:
       self.personality = log.LongitudinalPersonality.standard
     self.dp_long_use_df_tune = self.params.get_bool('dp_long_use_df_tune')
     self.dp_long_use_krkeegen_tune = self.params.get_bool('dp_long_use_krkeegen_tune')
+    # 读取ACM参数
+    self.acm_param = self.params.get_bool('dp_lon_acm')
+    self.acm_downhill_param = self.params.get_bool('dp_lon_acm_downhill')
+    # 读取前车起步提醒参数
+    self.lead_start_enabled = self.params.get_bool('dp_lead_start_alert')
+    self.lead_start_threshold = float(self.params.get('dp_lead_start_alert_threshold', encoding='utf8') or "10") * 0.1
+    self.lead_stop_threshold = float(self.params.get('dp_lead_stop_time_threshold', encoding='utf8') or "20") * 0.1
 
   def update(self, sm):
     """更新规划器状态和计算控制输出
@@ -121,7 +162,15 @@ class LongitudinalPlanner:
     # Read params every 50 iterations
     if self.param_read_counter % 50 == 0:
       self.read_param()
-
+    # 使用参数控制ACM状态，而不是dp_flags
+    if not self.acm_enabled and self.acm_param:
+      self.acm_enabled = True
+      self.acm.set_enabled(True)
+      if self.acm_downhill_param:
+        self.acm.set_downhill_only(True)
+    elif self.acm_enabled and not self.acm_param:
+      self.acm_enabled = False
+      self.acm.set_enabled(False)
     if self.param_read_counter % 300 == 0:
       self.accel_controller.set_profile(self.params.get("dp_long_accel_profile", encoding='utf-8'))
       self.vision_turn_controller.set_enabled(self.params.get_bool("dp_mapd_vision_turn_control"))
@@ -140,6 +189,12 @@ class LongitudinalPlanner:
     reset_state = long_control_state == LongCtrlState.off
     reset_state = reset_state or sm['carState'].gasPressed
 
+    # 确保使用正确的变量名
+    user_control = long_control_state == LongCtrlState.off if self.CP.openpilotLongitudinalControl else not sm['controlsState'].enabled
+    self.acm.update_states(sm['carControl'], sm['radarState'], user_control, v_ego, v_cruise)
+
+    if self.acm.just_disabled:
+      reset_state = True
     # No change cost when user is controlling the speed, or when standstill
     prev_accel_constraint = not (reset_state or sm['carState'].standstill)
     # 状态重置逻辑
@@ -181,6 +236,8 @@ class LongitudinalPlanner:
     self.a_desired_trajectory = np.interp(T_IDXS[:CONTROL_N], T_IDXS_MPC, self.mpc.a_solution)
     self.j_desired_trajectory = np.interp(T_IDXS[:CONTROL_N], T_IDXS_MPC[:-1], self.mpc.j_solution)
 
+    # Apply ACM post-processing to the acceleration trajectory if active
+    self.a_desired_trajectory = self.acm.update_a_desired_trajectory(self.a_desired_trajectory)
     # TODO counter is only needed because radar is glitchy, remove once radar is gone
     self.fcw = self.mpc.crash_cnt > 5
     if self.fcw:
@@ -189,7 +246,52 @@ class LongitudinalPlanner:
     # Interpolate 0.05 seconds and save as starting point for next iteration
     a_prev = self.a_desired
     self.a_desired = float(interp(DT_MDL, T_IDXS[:CONTROL_N], self.a_desired_trajectory))
-    self.v_desired_filter.x = self.v_desired_filter.x + DT_MDL * (self.a_desired + a_prev) / 2.0
+    self.v_desired_filter.x = max(0.0, min(self.v_desired_filter.x + DT_MDL * (self.a_desired + a_prev) / 2.0, V_CRUISE_MAX * CV.KPH_TO_MS))
+
+    # 计算最终输出加速度并应用ACM处理
+    # 获取纵向执行器延迟时间，取上下限的平均值
+    lower = getattr(self.CP, 'longitudinalActuatorDelayLowerBound', 0.15)  # 默认下限0.15秒
+    upper = getattr(self.CP, 'longitudinalActuatorDelayUpperBound', 0.15)  # 默认上限0.15秒
+    action_t = ((lower + upper) / 2.0) + DT_MDL  # 计算平均延迟加上模型时间步长
+    output_a_target, self.output_should_stop = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory,
+                                                                  action_t=action_t, vEgoStopping=self.CP.vEgoStopping)
+    # ACM处理和限制优化
+    if self.acm_enabled:
+      output_a_target = self.acm.update_output_a_target(output_a_target)
+      # 确保在基本限制范围内
+      output_a_target = np.clip(output_a_target, accel_limits[0], accel_limits[1])
+    # 应用平滑限制
+    accel_clip = accel_limits_turns.copy()
+    for idx in range(2):
+      accel_clip[idx] = np.clip(accel_clip[idx], self.prev_accel_clip[idx] - 0.05, self.prev_accel_clip[idx] + 0.05)
+    self.output_a_target = np.clip(output_a_target, accel_clip[0], accel_clip[1])
+    self.prev_accel_clip = accel_clip
+
+    # 改进的前车状态检测逻辑
+    if self.lead_start_enabled and sm['radarState'].leadOne.status:
+            lead = sm['radarState'].leadOne
+            current_time = sm.logMonoTime['radarState'] / 1e9
+            v_ego = sm['carState'].vEgo
+            # 综合判定前车停止状态
+            is_stopped = (lead.vLead < 0.5 and  # 前车速度低
+                        lead.dRel < 50.0 and   # 前车距离近(50米内)
+                        v_ego < 5.0 and        # 自车速度低
+                        abs(lead.aLeadK) < 0.5) # 前车加速度小
+            if is_stopped:
+                self.lead_stopped_time = current_time
+                self.lead_started = False
+                self.lead_start_alert = False
+            # 检测前车起步状态
+            elif not self.lead_started and lead.vLead > self.lead_start_threshold and \
+                (current_time - self.lead_stopped_time) > self.lead_stop_threshold:
+                self.lead_started = True
+                self.lead_start_alert = True
+                self.events.add(EventName.leadStartAlert)  # 添加事件提醒
+            else:
+                self.lead_start_alert = False
+    else:
+        self.lead_started = False
+        self.lead_start_alert = False
 
   def publish(self, sm, pm):
     plan_send = messaging.new_message('longitudinalPlan')
@@ -217,6 +319,11 @@ class LongitudinalPlanner:
     plan_ext_send = messaging.new_message('longitudinalPlanExt')
 
     longitudinalPlanExt = plan_ext_send.longitudinalPlanExt
+
+    # 添加 ACM 状态
+    longitudinalPlanExt.acmEnabled = self.acm_enabled
+    longitudinalPlanExt.acmDownhillOnly = self.acm_downhill_param
+    longitudinalPlanExt.acmActive = self.acm.active
 
     longitudinalPlanExt.visionTurnControllerState = self.vision_turn_controller.state
     longitudinalPlanExt.visionTurnSpeed = float(self.vision_turn_controller.v_turn)

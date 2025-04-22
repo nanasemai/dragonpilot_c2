@@ -13,11 +13,20 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
   # Ignore cruise standstill if car has a gas interceptor
   cruise_standstill = cruise_standstill and not CP.enableGasInterceptor
   accelerating = v_target_1sec > v_target
-  planned_stop = (v_target < CP.vEgoStopping and
-                  v_target_1sec < CP.vEgoStopping and
+  
+  # 优化停车判断逻辑
+  stopping_speed = CP.vEgoStopping * 1.2  # 增加缓冲区间
+  creeping_speed = CP.vEgoStopping * 0.5  # 爬行速度阈值
+  
+  # 计划停车条件优化
+  planned_stop = (v_target < stopping_speed and
+                  v_target_1sec < stopping_speed and
                   not accelerating)
-  stay_stopped = (v_ego < CP.vEgoStopping and
+                  
+  # 保持停车条件优化 
+  stay_stopped = (v_ego < creeping_speed and
                   (brake_pressed or cruise_standstill))
+                  
   stopping_condition = planned_stop or stay_stopped
 
   starting_condition = (v_target_1sec > CP.vEgoStarting and
@@ -54,12 +63,21 @@ class LongControl:
   def __init__(self, CP):
     self.CP = CP
     self.long_control_state = LongCtrlState.off  # initialized to off
-    self.pid = PIDController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
-                             (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
-                             k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
+    
+    # 优化PID控制器参数
+    self.pid = PIDController(
+      (CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
+      (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
+      k_f=CP.longitudinalTuning.kf,
+      k_d=0.1,  # 添加微分项
+      rate=1 / DT_CTRL
+    )
     self.v_pid = 0.0
     self.last_output_accel = 0.0
-
+    self.stopping_decel_rate = 0.8  # 基础减速度
+    self.max_stopping_decel = 2.0   # 最大停车减速度
+    self.min_stopping_decel = 0.2   # 最小停车减速度
+    
   def reset(self, v_pid):
     """Reset PID controller and change setpoint"""
     self.pid.reset()
@@ -103,8 +121,21 @@ class LongControl:
 
     elif self.long_control_state == LongCtrlState.stopping:
       if output_accel > self.CP.stopAccel:
+        # 计算到目标点的距离
+        stopping_distance = max(0.1, v_target - CS.vEgo)
+        
+        # 根据距离动态调整减速度
+        decel_rate = clip(self.stopping_decel_rate * (stopping_distance/5.0),
+                         -self.max_stopping_decel,
+                         -self.min_stopping_decel)
+        
         output_accel = min(output_accel, 0.0)
-        output_accel -= self.CP.stoppingDecelRate * DT_CTRL
+        output_accel += decel_rate * DT_CTRL
+        
+        # 支持低速爬行
+        if CS.vEgo < self.CP.vEgoStopping * 0.5:
+          output_accel = max(output_accel, -0.5)  # 允许小幅加速爬行
+          
       self.reset(CS.vEgo)
 
     elif self.long_control_state == LongCtrlState.starting:
