@@ -9,6 +9,10 @@ if [ "$GET_PROP_STZ" != "" ] && [ "$GET_PROP_ATZ" != "$GET_PROP_STZ" ]; then
     setprop persist.sys.timezone $GET_PROP_STZ
 fi
 
+# 开启自动时间同步
+setprop persist.sys.auto_time 1
+setprop persist.sys.auto_time_zone 1
+
 export PASSIVE="0"
 exec ./launch_chffrplus.sh
 

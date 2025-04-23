@@ -133,8 +133,8 @@ class LongitudinalPlanner:
     self.lead_start_alert = False  # 前车起步提醒标志
     self.lead_stopped_time = 0     # 前车停止时间
     self.lead_started = False      # 前车起步状态
-    self.lead_start_threshold = 1.0  # 默认起步速度阈值(m/s)
-    self.lead_stop_threshold = 2.0   # 默认停止时间阈值(s)
+    self.lead_start_threshold = 0.3  # 默认0.3 m/s
+    self.lead_stop_threshold = 3.0   # 默认3.0秒
 
   def read_param(self):
     try:
@@ -148,8 +148,8 @@ class LongitudinalPlanner:
     self.acm_downhill_param = self.params.get_bool('dp_lon_acm_downhill')
     # 读取前车起步提醒参数
     self.lead_start_enabled = self.params.get_bool('dp_lead_start_alert')
-    self.lead_start_threshold = float(self.params.get('dp_lead_start_alert_threshold', encoding='utf8') or "10") * 0.1
-    self.lead_stop_threshold = float(self.params.get('dp_lead_stop_time_threshold', encoding='utf8') or "20") * 0.1
+    self.lead_start_threshold = float(self.params.get('dp_lead_start_alert_threshold', encoding='utf8') or "3") * 0.1
+    self.lead_stop_threshold = float(self.params.get('dp_lead_stop_time_threshold', encoding='utf8') or "30") * 0.1
 
   def update(self, sm):
     """更新规划器状态和计算控制输出
@@ -273,23 +273,29 @@ class LongitudinalPlanner:
             current_time = sm.logMonoTime['radarState'] / 1e9
             v_ego = sm['carState'].vEgo
             # 综合判定前车停止状态
-            is_stopped = (lead.vLead < 0.5 and  # 前车速度低
-                        lead.dRel < 50.0 and   # 前车距离近(50米内)
-                        v_ego < 5.0 and        # 自车速度低
-                        abs(lead.aLeadK) < 0.5) # 前车加速度小
+            is_stopped = (lead.vLead < 0.3 and
+                        lead.dRel < 30.0 and  # 距离阈值
+                        v_ego < 1.0)      # 自车速度限制 (修改为 1.0 m/s)
             if is_stopped:
-                self.lead_stopped_time = current_time
+                # 如果确认前车已停止，更新停止时间戳，并重置起步和提醒状态
+                # 仅在首次检测到停止或距离上次更新超过一定时间（例如0.5秒）时更新时间戳，避免频繁更新
+                if not self.lead_started or (current_time - self.lead_stopped_time) > 0.5:
+                   self.lead_stopped_time = current_time
                 self.lead_started = False
                 self.lead_start_alert = False
-            # 检测前车起步状态
+            # 检测前车起步状态 (当前未记录为起步，且满足起步条件)
             elif not self.lead_started and lead.vLead > self.lead_start_threshold and \
                 (current_time - self.lead_stopped_time) > self.lead_stop_threshold:
-                self.lead_started = True
-                self.lead_start_alert = True
-                self.events.add(EventName.leadStartAlert)  # 添加事件提醒
+                # 如果前车速度超过起步阈值，并且距离上次确认停止的时间超过停止阈值
+                self.lead_started = True      # 标记为已起步
+                self.lead_start_alert = True  # 标记本周期需要提醒
+                if hasattr(EventName, 'leadStartAlert'): # 触发事件
+                    self.events.add(EventName.leadStartAlert)
             else:
+                # 如果不满足停止或起步条件，则本周期不提醒
                 self.lead_start_alert = False
     else:
+        # 如果功能未启用或未检测到前车，则重置状态
         self.lead_started = False
         self.lead_start_alert = False
 
