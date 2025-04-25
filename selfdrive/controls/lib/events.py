@@ -549,6 +549,14 @@ EVENTS: Dict[int, Dict[str, Union[Alert, AlertCallbackType]]] = {
       Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
   },
 
+  EventName.leadStartAlert: {
+    ET.WARNING: Alert(
+      _("前车已起步"),
+      _("请注意"),
+      AlertStatus.userPrompt, AlertSize.mid,
+      Priority.MID, VisualAlert.none, AudibleAlert.prompt, 2.0),
+  },
+
   EventName.steerSaturated: {
     ET.WARNING: Alert(
       _("Take Control"),

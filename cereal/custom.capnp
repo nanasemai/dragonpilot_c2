@@ -49,6 +49,10 @@ struct LongitudinalPlanExt @0xaedffd8f31e7b55d {
 
   dpE2EIsBlended @13 :Bool;
   longitudinalPlanExtSource @14 :LongitudinalPlanExtSource;
+  # 添加 ACM 相关状态
+  acmEnabled @15 :Bool;      # ACM 功能是否启用
+  acmDownhillOnly @16 :Bool; # 是否仅在下坡时启用 ACM
+  acmActive @17 :Bool;      # ACM 是否处于激活状态
 
   enum LongitudinalPlanExtSource {
     cruise @0;

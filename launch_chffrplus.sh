@@ -58,7 +58,11 @@ function two_init {
   # 获取设备运行模式，默认为普通模式
   device_mode="1"
   if [ -f /data/params/d/dp_device_mode ]; then
-    device_mode=$(cat /data/params/d/dp_device_mode)
+    mode=$(cat /data/params/d/dp_device_mode)
+    case $mode in
+      "0"|"1"|"2") device_mode=$mode ;;
+      *) device_mode="1" ;;
+    esac
   fi
 
   # set IO scheduler
@@ -66,19 +70,25 @@ function two_init {
     "0") # 节能模式
       setprop sys.io.scheduler cfq
       for f in /sys/block/*/queue/scheduler; do
-        echo cfq > $f
+        if grep -q "cfq" $f; then
+          echo cfq > $f 2>/dev/null || true
+        fi
       done
       ;;
     "2") # 性能模式
       setprop sys.io.scheduler deadline
       for f in /sys/block/*/queue/scheduler; do
-        echo deadline > $f
+        if grep -q "deadline" $f; then
+          echo deadline > $f 2>/dev/null || true
+        fi
       done
       ;;
     *) # 普通模式（默认）
       setprop sys.io.scheduler noop
       for f in /sys/block/*/queue/scheduler; do
-        echo noop > $f
+        if grep -q "noop" $f; then
+          echo noop > $f 2>/dev/null || true
+        fi
       done
       ;;
   esac
@@ -117,13 +127,19 @@ function two_init {
   esac
 
   # mask off 2-3 from RPS and XPS - Receive/Transmit Packet Steering
-  echo 3 | tee  /sys/class/net/*/queues/*/rps_cpus
-  echo 3 | tee  /sys/class/net/*/queues/*/xps_cpus
+  for f in /sys/class/net/*/queues/*/rps_cpus; do
+    [ -f "$f" ] && echo 3 > "$f" 2>/dev/null || true
+  done
+  for f in /sys/class/net/*/queues/*/xps_cpus; do
+    [ -f "$f" ] && echo 3 > "$f" 2>/dev/null || true
+  done
 
   # *** set up governors ***
   case $device_mode in
     "0") # 节能模式
-      echo "powersave" > /sys/class/devfreq/soc:qcom,cpubw/governor
+      for dev in /sys/class/devfreq/soc:qcom,*; do
+        [ -f "$dev/governor" ] && echo "powersave" > "$dev/governor"
+      done
       if [ -f /ONEPLUS ]; then
         echo 902400 > /sys/class/devfreq/soc:qcom,m4m/max_freq
       else
@@ -135,9 +151,14 @@ function two_init {
       echo "powersave" > /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor
       ;;
     "2") # 性能模式
-      echo "performance" > /sys/class/devfreq/soc:qcom,cpubw/governor
+      for dev in /sys/class/devfreq/soc:qcom,*; do
+        [ -f "$dev/governor" ] && echo "performance" > "$dev/governor"
+      done
       if [ -f /ONEPLUS ]; then
         echo 1593600 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+        # 增加CPU频率设置
+        echo 2016000 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+        echo 2016000 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
       else
         echo 1190400 > /sys/class/devfreq/soc:qcom,m4m/max_freq
       fi
@@ -148,6 +169,9 @@ function two_init {
       ;;
     *) # 普通模式（默认）
       echo "performance" > /sys/class/devfreq/soc:qcom,cpubw/governor
+      for dev in /sys/class/devfreq/soc:qcom,*; do
+        [ -f "$dev/governor" ] && echo "performance" > "$dev/governor"
+      done
       if [ -f /ONEPLUS ]; then
         echo 1363200 > /sys/class/devfreq/soc:qcom,m4m/max_freq
       else
@@ -182,28 +206,37 @@ function two_init {
   # 温控设置
   case $device_mode in
     "0") # 节能模式
-      # 标准温控设置
-      echo 82000 > /sys/class/thermal/thermal_zone0/trip_point_0_temp
-      echo 92000 > /sys/class/thermal/thermal_zone0/trip_point_1_temp
       # 限制最大 CPU 频率
       echo 1401600 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
       echo 1401600 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
+      # 设置温控阈值
+      for zone in /sys/class/thermal/thermal_zone*; do
+        if [ -f "$zone/trip_point_0_temp" ]; then
+          echo 85000 > "$zone/trip_point_0_temp" 2>/dev/null || true
+        fi
+      done
       ;;
     "2") # 性能模式
-      # 略微提升温度阈值
-      echo 84000 > /sys/class/thermal/thermal_zone0/trip_point_0_temp
-      echo 94000 > /sys/class/thermal/thermal_zone0/trip_point_1_temp
       # 提高最大 CPU 频率
       echo 2016000 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
       echo 2016000 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
+      # 设置温控阈值
+      for zone in /sys/class/thermal/thermal_zone*; do
+        if [ -f "$zone/trip_point_0_temp" ]; then
+          echo 85000 > "$zone/trip_point_0_temp" 2>/dev/null || true
+        fi
+      done
       ;;
     *) # 普通模式（默认）
-      # 标准温控设置
-      echo 82000 > /sys/class/thermal/thermal_zone0/trip_point_0_temp
-      echo 92000 > /sys/class/thermal/thermal_zone0/trip_point_1_temp
       # 默认 CPU 频率
       echo 1804800 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
       echo 1804800 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
+      # 设置温控阈值
+      for zone in /sys/class/thermal/thermal_zone*; do
+        if [ -f "$zone/trip_point_0_temp" ]; then
+          echo 85000 > "$zone/trip_point_0_temp" 2>/dev/null || true
+        fi
+      done
       ;;
   esac
 
@@ -227,9 +260,13 @@ function two_init {
   # GPU and camera get cpu 2
   CAM_IRQS="177 178 179 180 181 182 183 184 185 186 192"
   for irq in $CAM_IRQS; do
-    echo 2 > /proc/irq/$irq/smp_affinity_list
+    if [ -f "/proc/irq/$irq/smp_affinity_list" ]; then
+      echo 2 > /proc/irq/$irq/smp_affinity_list 2>/dev/null || true
+    fi
   done
-  echo 2 > /proc/irq/193/smp_affinity_list # GPU
+  if [ -f "/proc/irq/193/smp_affinity_list" ]; then
+    echo 2 > /proc/irq/193/smp_affinity_list 2>/dev/null || true
+  fi
 
   # give GPU threads RT priority
   for pid in $(pgrep "kgsl"); do
@@ -239,7 +276,6 @@ function two_init {
   # the flippening!
   LD_LIBRARY_PATH="" content insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:1
 
-  # disable bluetooth
   # disable bluetooth
   (service call bluetooth_manager 8) &
 

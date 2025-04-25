@@ -117,6 +117,7 @@ struct CarEvent @0x9b1657f34caf3ad3 {
     calibrationRecalibrating @117;
     roadEdgeDetected @118;  # 道路边缘检测提醒
     steerTorqueOver @119;  # 力矩过大
+    leadStartAlert @120;  # 前车起步提醒
 
     radarCanErrorDEPRECATED @15;
     communityFeatureDisallowedDEPRECATED @62;

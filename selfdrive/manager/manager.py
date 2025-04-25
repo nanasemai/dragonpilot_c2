@@ -116,8 +116,14 @@ def manager_init() -> None:
     ("dp_lateral_torque_kp", "100"),  # 1.0
     ("dp_lateral_torque_ki", "10"),  # 0.1
     ("dp_disable_gps", "0"),
-	  ("dp_lat_use_siglin", "0"),
+    ("dp_lat_use_siglin", "0"),
     ("dp_device_go_off_road", "0"),  # 添加离线模式参数
+    ("dp_lon_acm", "0"),
+    ("dp_lon_acm_downhill", "0"),
+    # 添加前车起步提醒相关参数
+    ("dp_lead_start_alert", "0"),  # 前车起步提醒功能开关，默认关闭
+    ("dp_lead_start_alert_threshold", "3"),  # 前车起步速度阈值(m/s)x0.1 默认0.3 m/s
+    ("dp_lead_stop_time_threshold", "30"),  # 前车停止时间阈值(s)x0.1 默认3.0秒
   ]
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))
@@ -233,7 +239,7 @@ def manager_thread() -> None:
     ignore += ["ubloxd", "gpx_uploader", "gpxd", "mapd"]
 
   if params.get_bool("dp_disable_gps"):
-    ignore += ["ubloxd", "gpx_uploader", "gpxd", "mapd"]  
+    ignore += ["ubloxd", "gpx_uploader", "gpxd", "mapd"]
 
   if not params.get_bool("dp_fleet_fileserv"):
     ignore += ["fleet_manager"]
