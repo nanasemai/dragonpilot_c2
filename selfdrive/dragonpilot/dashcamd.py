@@ -82,7 +82,7 @@ class Dashcamd:
     self.DASHCAM_DURATION = max(60, min(180, self.config['duration']))
     self.DASHCAM_BIT_RATES = self.quality_settings["bitrate"]
     self.DASHCAM_MAX_SIZE_PER_FILE = self.DASHCAM_BIT_RATES / 8 * self.DASHCAM_DURATION
-    self.DASHCAM_FREESPACE_LIMIT = 30  # 改为30%空间预留
+    self.DASHCAM_FREESPACE_LIMIT = 20  # 20%空间预留
     kept_hours = max(1, min(72, self.config['kept_hours']))  # 限制在1-72小时之间
     self.DASHCAM_KEPT_MIN_SIZE = self.DASHCAM_MAX_SIZE_PER_FILE * (kept_hours * 60 * 60 / self.DASHCAM_DURATION)
 
@@ -179,31 +179,36 @@ class Dashcamd:
   def _clean_up_space(self):
       with self.cleanup_lock:
           try:
-              # 添加定期清理条件
-              need_clean = (self.free_space < self.DASHCAM_FREESPACE_LIMIT or 
-                           self._get_used_space() > self.DASHCAM_KEPT_MIN_SIZE or
-                           time.time() - self.last_clean_time > self.CLEAN_INTERVAL)
-              
-              if need_clean:
+              # 只有空间不足时才清理，不单独因时间到就清理
+              need_clean = (
+                  self.free_space < self.DASHCAM_FREESPACE_LIMIT or 
+                  self._get_used_space() > self.DASHCAM_KEPT_MIN_SIZE
+              )
+              # 如果空间充足但超过清理间隔，可以做一次轻量清理（如只删空文件），可选
+              if not need_clean and (time.time() - self.last_clean_time > self.CLEAN_INTERVAL):
+                  # 只清理空文件
+                  for f in os.listdir(self.video_dir):
+                      full_path = os.path.join(self.video_dir, f)
+                      if os.path.isfile(full_path) and os.path.getsize(full_path) == 0:
+                          os.remove(full_path)
+                  return
+
+              if need_clean or (time.time() - self.last_clean_time > self.CLEAN_INTERVAL):
                   files = []
-                  for f in os.listdir(self.video_dir):  # 改为self.video_dir
-                      full_path = os.path.join(self.video_dir, f)  # 改为self.video_dir
+                  for f in os.listdir(self.video_dir):
+                      full_path = os.path.join(self.video_dir, f)
                       if not os.path.isfile(full_path):
                           continue
-
                       try:
-                          # 一次性获取文件大小和修改时间
                           stat = os.stat(full_path)
-                          if stat.st_size == 0:  # 空文件直接删除
+                          if stat.st_size == 0:
                               os.remove(full_path)
                               continue
-                          files.append((full_path, stat.st_mtime, stat.st_size))  # 保存路径、修改时间和大小
+                          files.append((full_path, stat.st_mtime, stat.st_size))
                       except Exception:
                           continue
-
-                  # 按修改时间排序，删除最旧的
                   if files:
-                      files.sort(key=lambda x: x[1])  # 按修改时间排序
+                      files.sort(key=lambda x: x[1])
                       space_needed = self.DASHCAM_MAX_SIZE_PER_FILE * 5
                       space_freed = 0
                       for file_info in files:
@@ -211,14 +216,15 @@ class Dashcamd:
                               break
                           try:
                               os.remove(file_info[0])
-                              space_freed += file_info[2]  # 使用预存的文件大小
-                              cloudlog.info(f"已删除旧文件: {file_info[0]}") 
+                              space_freed += file_info[2]
+                              cloudlog.info(f"已删除旧文件: {file_info[0]}")
                           except Exception as e:
                               cloudlog.error(f"删除文件失败: {str(e)}")
                               continue
           except Exception as e:
               cloudlog.error(f"清理空间出错: {str(e)}")
-      self.last_clean_time = time.time()
+          finally:
+              self.last_clean_time = time.time()
 
   def _get_used_space(self):
     """获取已使用的空间大小"""
