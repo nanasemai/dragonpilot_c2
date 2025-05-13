@@ -71,26 +71,25 @@ class ACM:
     self.just_disabled = self._active_prev and not self.active
     self._active_prev = self.active
 
-  def update_a_desired_trajectory(self, a_desired_trajectory):
+  def update_a_desired_trajectory(self, a_desired_trajectory, v_ego, v_cruise):
     if not self.active:
       return a_desired_trajectory
 
-    # Suppress all braking to allow smooth coasting
+    # 只有真正超过巡航速度时才抑制正向加速度，轻微制动依然抑制
     for i in range(len(a_desired_trajectory)):
-      if a_desired_trajectory[i] < 0 and a_desired_trajectory[i] > self.allowed_brake_val:
+      if v_ego > v_cruise and a_desired_trajectory[i] > 0:
+        a_desired_trajectory[i] = 0.0
+      elif a_desired_trajectory[i] < 0 and a_desired_trajectory[i] > self.allowed_brake_val:
         a_desired_trajectory[i] = 0.0
     return a_desired_trajectory
 
-  def update_output_a_target(self, output_a_target):
-    """更新输出加速度目标
-    抑制不必要的刹车以允许平滑滑行
-    返回处理后的加速度目标
-    """
+  def update_output_a_target(self, output_a_target, v_ego, v_cruise):
     if not self.active:
       return output_a_target
 
-    # Suppress braking
-    if output_a_target < 0 and output_a_target > self.allowed_brake_val:
+    if v_ego > v_cruise and output_a_target > 0:
+      output_a_target = 0.0
+    elif output_a_target < 0 and output_a_target > self.allowed_brake_val:
       output_a_target = 0.0
     return output_a_target
 
