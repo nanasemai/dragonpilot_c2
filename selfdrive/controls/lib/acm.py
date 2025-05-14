@@ -91,7 +91,7 @@ class ACM:
         # 新增逻辑：如果处于下坡状态 (且ACM激活)，即使速度略低于巡航，也抑制加速
         elif self._is_downhill:
           # 下坡时，如果不需要加速，设置为0让重力做功
-          output_a_target = TARGET_ACCEL_NEAR_ZERO # (如果希望轻微维持)
+          a_desired_trajectory[i] = TARGET_ACCEL_NEAR_ZERO # (如果希望轻微维持)
 
     return a_desired_trajectory
 
