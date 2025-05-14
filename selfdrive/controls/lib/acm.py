@@ -13,13 +13,14 @@
 # Downhill Coasting allows the vehicle to maintain or slightly increase speed on downhill slopes without braking.
 import numpy as np
 # 坡度阈值，当sin(pitch)小于此值时判定为下坡
-SLOPE = -0.04  
+SLOPE = -0.04
 # 车速比例阈值，当前车速超过巡航速度*RATIO时判定为超速
-RATIO = 0.9    
+RATIO = 0.9
 # 前车碰撞时间(TTC)相关参数
 TTC = 5.  # 前车碰撞时间阈值(秒)
 TTC_BP = [5.0, 3.0]  # 碰撞时间插值点
 MIN_BRAKE_ALLOW_VALS = [0., -0.5]  # 对应不同碰撞时间允许的最小刹车值
+TARGET_ACCEL_NEAR_ZERO = 0.02 # 趋近于零的目标加速度值，用于平滑控制
 
 class ACM:
   def __init__(self, enabled = False, downhill_only = False):
@@ -79,22 +80,19 @@ class ACM:
       # 处理减速请求
       if a_desired_trajectory[i] < 0:
         if not self._has_lead or a_desired_trajectory[i] > self.allowed_brake_val:
-          a_desired_trajectory[i] = 0.0
+          # 当抑制减速时，设置为一个小的正加速度以克服阻力，或0
+          a_desired_trajectory[i] = TARGET_ACCEL_NEAR_ZERO
       # 处理加速请求
       elif a_desired_trajectory[i] > 0:
         # 如果当前速度已经超过或等于巡航速度，则不允许再加速
         if v_ego >= v_cruise:
-          a_desired_trajectory[i] = 0.0
-        # 新增逻辑：如果处于下坡状态 (且ACM激活)，即使速度略低于巡航，也抑制加速，让重力做功
-        # 你可能需要定义一个速度阈值，例如 v_ego > v_cruise * SOME_LOWER_RATIO_FOR_DOWNHILL (比如0.85)
-        # 或者简单地只要在下坡就抑制加速，除非速度远低于巡航速度
-        elif self._is_downhill: # and (v_ego > v_cruise * 0.85) # 可选的更精细控制
-          # 这里可以根据需求决定是完全置零，还是施加一个非常小的维持加速度，或者允许一个非常缓慢的加速
-          # 为了实现“完全不施加任何正向驱动力”，我们将其置零
-          a_desired_trajectory[i] = 0.0
-          # 如果希望允许非常缓慢的滑行加速，可以注释掉上面一行，或者设置一个极小的正值
-          # pass # 如果注释掉上面一行，则会走正常的加速逻辑（如果v_ego < v_cruise）
-          
+          # 当抑制加速（超速）时，设置为一个小的负加速度模拟松油门，或0
+          a_desired_trajectory[i] = -TARGET_ACCEL_NEAR_ZERO
+        # 新增逻辑：如果处于下坡状态 (且ACM激活)，即使速度略低于巡航，也抑制加速
+        elif self._is_downhill:
+          # 下坡时，如果不需要加速，设置为0让重力做功
+          output_a_target = TARGET_ACCEL_NEAR_ZERO # (如果希望轻微维持)
+
     return a_desired_trajectory
 
   def update_output_a_target(self, output_a_target, v_ego, v_cruise):
@@ -104,16 +102,19 @@ class ACM:
     # 处理减速请求
     if output_a_target < 0:
       if not self._has_lead or output_a_target > self.allowed_brake_val:
-        output_a_target = 0.0
+        # 当抑制减速时，设置为一个小的正加速度以克服阻力，或0
+        output_a_target = TARGET_ACCEL_NEAR_ZERO
     # 处理加速请求
     elif output_a_target > 0:
       # 如果当前速度已经超过或等于巡航速度，则不允许再加速
       if v_ego >= v_cruise:
-        output_a_target = 0.0
+        # 当抑制加速（超速）时，设置为一个小的负加速度模拟松油门，或0
+        output_a_target = -TARGET_ACCEL_NEAR_ZERO
       # 新增逻辑：如果处于下坡状态 (且ACM激活)，即使速度略低于巡航，也抑制加速
-      elif self._is_downhill: # and (v_ego > v_cruise * 0.85) # 可选的更精细控制
-        output_a_target = 0.0
-        
+      elif self._is_downhill:
+        # 下坡时，如果不需要加速，设置为0让重力做功
+        output_a_target = TARGET_ACCEL_NEAR_ZERO # (如果希望轻微维持)
+
     return output_a_target
 
   def set_enabled(self, enabled):
