@@ -237,7 +237,7 @@ class LongitudinalPlanner:
     self.j_desired_trajectory = np.interp(T_IDXS[:CONTROL_N], T_IDXS_MPC[:-1], self.mpc.j_solution)
 
     # Apply ACM post-processing to the acceleration trajectory if active
-    self.a_desired_trajectory = self.acm.update_a_desired_trajectory(self.a_desired_trajectory, v_ego, v_cruise)
+    self.a_desired_trajectory = self.acm.update_a_desired_trajectory(self.a_desired_trajectory)
     # TODO counter is only needed because radar is glitchy, remove once radar is gone
     self.fcw = self.mpc.crash_cnt > 5
     if self.fcw:
@@ -256,10 +256,7 @@ class LongitudinalPlanner:
     output_a_target, self.output_should_stop = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory,
                                                                   action_t=action_t, vEgoStopping=self.CP.vEgoStopping)
     # ACM处理和限制优化
-    if self.acm_enabled:
-      output_a_target = self.acm.update_output_a_target(output_a_target, v_ego, v_cruise)
-      # 确保在基本限制范围内
-      output_a_target = np.clip(output_a_target, accel_limits[0], accel_limits[1])
+    output_a_target = self.acm.update_output_a_target(output_a_target)
     # 应用平滑限制
     accel_clip = accel_limits_turns.copy()
     for idx in range(2):
