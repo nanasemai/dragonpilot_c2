@@ -75,22 +75,45 @@ class ACM:
     if not self.active:
       return a_desired_trajectory
 
-    # 只有真正超过巡航速度时才抑制正向加速度，轻微制动依然抑制
     for i in range(len(a_desired_trajectory)):
-      if v_ego > v_cruise and a_desired_trajectory[i] > 0:
-        a_desired_trajectory[i] = 0.0
-      elif a_desired_trajectory[i] < 0 and a_desired_trajectory[i] > self.allowed_brake_val:
-        a_desired_trajectory[i] = 0.0
+      # 处理减速请求
+      if a_desired_trajectory[i] < 0:
+        if not self._has_lead or a_desired_trajectory[i] > self.allowed_brake_val:
+          a_desired_trajectory[i] = 0.0
+      # 处理加速请求
+      elif a_desired_trajectory[i] > 0:
+        # 如果当前速度已经超过或等于巡航速度，则不允许再加速
+        if v_ego >= v_cruise:
+          a_desired_trajectory[i] = 0.0
+        # 新增逻辑：如果处于下坡状态 (且ACM激活)，即使速度略低于巡航，也抑制加速，让重力做功
+        # 你可能需要定义一个速度阈值，例如 v_ego > v_cruise * SOME_LOWER_RATIO_FOR_DOWNHILL (比如0.85)
+        # 或者简单地只要在下坡就抑制加速，除非速度远低于巡航速度
+        elif self._is_downhill: # and (v_ego > v_cruise * 0.85) # 可选的更精细控制
+          # 这里可以根据需求决定是完全置零，还是施加一个非常小的维持加速度，或者允许一个非常缓慢的加速
+          # 为了实现“完全不施加任何正向驱动力”，我们将其置零
+          a_desired_trajectory[i] = 0.0
+          # 如果希望允许非常缓慢的滑行加速，可以注释掉上面一行，或者设置一个极小的正值
+          # pass # 如果注释掉上面一行，则会走正常的加速逻辑（如果v_ego < v_cruise）
+          
     return a_desired_trajectory
 
   def update_output_a_target(self, output_a_target, v_ego, v_cruise):
     if not self.active:
       return output_a_target
 
-    if v_ego > v_cruise and output_a_target > 0:
-      output_a_target = 0.0
-    elif output_a_target < 0 and output_a_target > self.allowed_brake_val:
-      output_a_target = 0.0
+    # 处理减速请求
+    if output_a_target < 0:
+      if not self._has_lead or output_a_target > self.allowed_brake_val:
+        output_a_target = 0.0
+    # 处理加速请求
+    elif output_a_target > 0:
+      # 如果当前速度已经超过或等于巡航速度，则不允许再加速
+      if v_ego >= v_cruise:
+        output_a_target = 0.0
+      # 新增逻辑：如果处于下坡状态 (且ACM激活)，即使速度略低于巡航，也抑制加速
+      elif self._is_downhill: # and (v_ego > v_cruise * 0.85) # 可选的更精细控制
+        output_a_target = 0.0
+        
     return output_a_target
 
   def set_enabled(self, enabled):
