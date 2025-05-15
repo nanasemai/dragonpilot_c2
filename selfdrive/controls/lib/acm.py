@@ -22,6 +22,7 @@ TTC = 5.  # 前车碰撞时间阈值(秒)
 # MIN_BRAKE_ALLOW_VALS = [0., -0.5]  # 对应不同碰撞时间允许的最小刹车值 (旧)
 TTC_BP = [3.0, 5.0]  # 碰撞时间插值点 (修正为单调递增)
 MIN_BRAKE_ALLOW_VALS = [-0.5, 0.0]  # 对应不同碰撞时间允许的最小刹车值 (对应修正)
+SPEED_THRESHOLD_FOR_ACCEL_LIMIT = 0.5 # 超速判断时，允许超过巡航速度的阈值 (m/s)，约等于 1.8 km/h
 
 class ACM:
   def __init__(self, enabled = False, downhill_only = False):
@@ -37,6 +38,8 @@ class ACM:
     self.just_disabled = False  # ACM是否刚刚被禁用
     self.allowed_brake_val = 0.  # 允许的最小刹车值
     self.lead_ttc = float('inf')  # 与前车的碰撞时间(Time To Collision)，默认无穷大
+    self.v_ego = 0.0  # 当前车速
+    self.v_cruise = 0.0  # 巡航速度
 
   def update_states(self, cs, rs, user_ctrl_lon, v_ego, v_cruise):
     """更新ACM状态
@@ -48,6 +51,8 @@ class ACM:
     - v_cruise: 巡航速度
     """
     self.lead_ttc = float('inf')  # 如果没有前车，默认为无穷大
+    self.v_ego = v_ego # 保存当前车速
+    self.v_cruise = v_cruise # 保存巡航速度
 
     # 如果ACM功能未启用，则直接返回，不激活ACM
     if not self._enabled:
@@ -63,7 +68,7 @@ class ACM:
     pitch_rad = cs.orientationNED[1]  # 获取俯仰角（弧度）
     self._is_downhill = np.sin(pitch_rad) < SLOPE # 判断是否为下坡
     # 计算当前车速是否超过巡航速度的一定比例
-    self._is_speed_over_cruise = v_ego > (v_cruise * RATIO)
+    self._is_speed_over_cruise = self.v_ego > (self.v_cruise * RATIO)
 
     # 获取前车信息
     lead = rs.leadOne
@@ -114,6 +119,8 @@ class ACM:
           a_desired_trajectory[i] = 0.0  # 选择滑行，而不是轻微刹车
         else:  # 如果系统请求的刹车力度大于或等于允许的最小刹车值 (accel_val <= self.allowed_brake_val)
           a_desired_trajectory[i] = self.allowed_brake_val  # 将刹车力度限制在允许的最大值
+      elif accel_val > 0 and self.v_ego > (self.v_cruise + SPEED_THRESHOLD_FOR_ACCEL_LIMIT): # 如果系统希望加速，且当前车速已超过巡航速度
+        a_desired_trajectory[i] = 0.0 # 限制正向加速度为0，允许车辆自然减速    
     return a_desired_trajectory
 
   def update_output_a_target(self, output_a_target):
@@ -136,6 +143,8 @@ class ACM:
             output_a_target = 0.0  # 选择滑行，而不是轻微刹车
         else:  # 如果系统请求的刹车力度大于或等于允许的最小刹车值 (output_a_target <= self.allowed_brake_val)
             output_a_target = self.allowed_brake_val  # 将刹车力度限制在允许的最大值
+    elif self.active and output_a_target > 0 and self.v_ego > (self.v_cruise + SPEED_THRESHOLD_FOR_ACCEL_LIMIT): # ACM激活，系统请求加速，且当前车速已超过巡航速度
+        output_a_target = 0.0 # 限制正向加速度目标为0，允许车辆自然减速
     return output_a_target
 
   def set_enabled(self, enabled):
