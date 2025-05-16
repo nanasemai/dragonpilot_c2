@@ -27,7 +27,7 @@ QUALITY_PRESETS = {
 # 数值到质量字符串的映射
 QUALITY_MAP = {
     0: "low",
-    1: "medium", 
+    1: "medium",
     2: "high"
 }
 
@@ -59,7 +59,8 @@ class Dashcamd:
 
   def update_config(self, config):
       self.config.update(config)
-      
+      cloudlog.info(f"Dashcamd update_config - self.config['duration']: {self.config['duration']}") # 添加日志
+
       # 处理quality参数
       quality = self.config['quality']
       try:
@@ -69,22 +70,21 @@ class Dashcamd:
               quality = QUALITY_MAP.get(quality, "medium")
       except (ValueError, TypeError):
           quality = "medium"  # 默认中等质量
-  
+
       if quality not in QUALITY_PRESETS:
           quality = "medium"
-  
+
       self.quality_settings = QUALITY_PRESETS[quality]
       self._update_storage_limits()
 
   def _update_storage_limits(self):
-    """根据配置更新存储限制"""
-    # 限制录制时长在1-3分钟之间
-    self.DASHCAM_DURATION = max(60, min(180, self.config['duration']))
-    self.DASHCAM_BIT_RATES = self.quality_settings["bitrate"]
-    self.DASHCAM_MAX_SIZE_PER_FILE = self.DASHCAM_BIT_RATES / 8 * self.DASHCAM_DURATION
-    self.DASHCAM_FREESPACE_LIMIT = 20  # 20%空间预留
-    kept_hours = max(1, min(72, self.config['kept_hours']))  # 限制在1-72小时之间
-    self.DASHCAM_KEPT_MIN_SIZE = self.DASHCAM_MAX_SIZE_PER_FILE * (kept_hours * 60 * 60 / self.DASHCAM_DURATION)
+      self.DASHCAM_DURATION = self.config['duration']  # 直接使用配置值
+      cloudlog.info(f"Dashcamd _update_storage_limits - self.DASHCAM_DURATION: {self.DASHCAM_DURATION}")
+      self.DASHCAM_BIT_RATES = self.quality_settings["bitrate"]
+      self.DASHCAM_MAX_SIZE_PER_FILE = self.DASHCAM_BIT_RATES / 8 * self.DASHCAM_DURATION
+      self.DASHCAM_FREESPACE_LIMIT = 20  # 20%空间预留
+      kept_hours = max(1, min(72, self.config['kept_hours']))  # 限制在1-72小时之间
+      self.DASHCAM_KEPT_MIN_SIZE = self.DASHCAM_MAX_SIZE_PER_FILE * (kept_hours * 60 * 60 / self.DASHCAM_DURATION)
 
   def start_recording(self, free_space):
     """开始循环录制"""
@@ -181,7 +181,7 @@ class Dashcamd:
           try:
               # 只有空间不足时才清理，不单独因时间到就清理
               need_clean = (
-                  self.free_space < self.DASHCAM_FREESPACE_LIMIT or 
+                  self.free_space < self.DASHCAM_FREESPACE_LIMIT or
                   self._get_used_space() > self.DASHCAM_KEPT_MIN_SIZE
               )
               # 如果空间充足但超过清理间隔，可以做一次轻量清理（如只删空文件），可选
