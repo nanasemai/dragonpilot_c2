@@ -238,7 +238,7 @@ class LongitudinalPlanner:
 
     # Apply ACM post-processing to the acceleration trajectory if active
     # 只在ACM开关打开时更新期望加速度轨迹
-    if self.acm.enabled:
+    if self.acm_enabled:
       self.a_desired_trajectory = self.acm.update_a_desired_trajectory(self.a_desired_trajectory)
     # TODO counter is only needed because radar is glitchy, remove once radar is gone
     self.fcw = self.mpc.crash_cnt > 5
@@ -257,16 +257,16 @@ class LongitudinalPlanner:
     action_t = ((lower + upper) / 2.0) + DT_MDL  # 计算平均延迟加上模型时间步长
     output_a_target, self.output_should_stop = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory,
                                                                   action_t=action_t, vEgoStopping=self.CP.vEgoStopping)
-    
+
     # 只在ACM开关打开时执行ACM相关操作
-    if self.acm.enabled:
+    if self.acm_enabled and self.acm.active:
       # ACM处理和限制优化
       output_a_target = self.acm.update_output_a_target(output_a_target)
 
     # 应用平滑限制
     accel_clip = accel_limits_turns.copy()
     # 如果ACM激活，使用ACM的输出值和限制
-    if self.acm.enabled and self.acm.active:
+    if self.acm_enabled and self.acm.active:
       self.output_a_target = output_a_target
       self.prev_accel_clip = accel_clip
     else:
