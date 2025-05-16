@@ -23,6 +23,7 @@ TTC = 5.  # 前车碰撞时间阈值(秒)
 TTC_BP = [3.0, 5.0]  # 碰撞时间插值点 (修正为单调递增)
 MIN_BRAKE_ALLOW_VALS = [-0.5, 0.0]  # 对应不同碰撞时间允许的最小刹车值 (对应修正)
 SPEED_THRESHOLD_FOR_ACCEL_LIMIT = 0.5 # 超速判断时，允许超过巡航速度的阈值 (m/s)，约等于 1.8 km/h
+MIN_ACCEL = -0.05  # 滑行时的最小减速度，避免ECU补油
 
 class ACM:
   def __init__(self, enabled = False, downhill_only = False):
@@ -114,13 +115,13 @@ class ACM:
       accel_val = a_desired_trajectory[i] # 获取当前点的加速度值
       if accel_val < 0:  # 如果系统希望在该轨迹点刹车
         if self.allowed_brake_val == 0.0:  # 如果是纯滑行模式（无前车或前车距离远）
-          a_desired_trajectory[i] = 0.0 # 将期望加速度设为0，实现滑行
+          a_desired_trajectory[i] = MIN_ACCEL # 将期望加速度设为小的负值，而不是0
         elif accel_val > self.allowed_brake_val:  # 如果系统请求的刹车力度比允许的最小刹车值更温和
-          a_desired_trajectory[i] = 0.0  # 选择滑行，而不是轻微刹车
+          a_desired_trajectory[i] = MIN_ACCEL  # 选择微弱减速，而不是滑行
         else:  # 如果系统请求的刹车力度大于或等于允许的最小刹车值 (accel_val <= self.allowed_brake_val)
           a_desired_trajectory[i] = self.allowed_brake_val  # 将刹车力度限制在允许的最大值
       elif accel_val > 0 and self.v_ego > (self.v_cruise + SPEED_THRESHOLD_FOR_ACCEL_LIMIT): # 如果系统希望加速，且当前车速已超过巡航速度
-        a_desired_trajectory[i] = 0.0 # 限制正向加速度为0，允许车辆自然减速    
+        a_desired_trajectory[i] = MIN_ACCEL # 限制为微弱减速，而不是0    
     return a_desired_trajectory
 
   def update_output_a_target(self, output_a_target):
@@ -132,19 +133,16 @@ class ACM:
     # 条件2: 预判到松油门后会激活ACM，并且当前允许的刹车值为0.0（即目标是纯滑行）
     # 并且系统当前的加速度目标是负值（即想要刹车）
     if (self.active or (self.will_activate_on_gas_release and self.allowed_brake_val == 0.0)) and output_a_target < 0:
-      # 在纯滑行或预判纯滑行的情况下，直接将目标加速度设为0
-      # 注意：如果预判时也需要考虑带前车的情况，这里的逻辑会更复杂，需要确保 allowed_brake_val 的正确性
-      # 这种情况下，即使ACM尚未正式激活（因为用户可能还在踩油门），但由于预判到松油门后会进入纯滑行状态，
-      # 所以提前将MPC等模块计算出的减速度抑制掉，避免松油门瞬间的顿挫感。
-      output_a_target = 0.0
+      # 在纯滑行或预判纯滑行的情况下，设置为微弱减速而不是0
+      output_a_target = MIN_ACCEL
     elif self.active and output_a_target < 0: # ACM激活且有前车约束的情况 (self.allowed_brake_val 可能小于 0)
         # 这种情况下，ACM已经激活，并且可能存在前车，所以需要根据 allowed_brake_val 来限制刹车
         if output_a_target > self.allowed_brake_val:  # 如果系统请求的刹车力度比允许的最小刹车值更温和
-            output_a_target = 0.0  # 选择滑行，而不是轻微刹车
+            output_a_target = MIN_ACCEL  # 选择微弱减速，而不是滑行
         else:  # 如果系统请求的刹车力度大于或等于允许的最小刹车值 (output_a_target <= self.allowed_brake_val)
             output_a_target = self.allowed_brake_val  # 将刹车力度限制在允许的最大值
     elif self.active and output_a_target > 0 and self.v_ego > (self.v_cruise + SPEED_THRESHOLD_FOR_ACCEL_LIMIT): # ACM激活，系统请求加速，且当前车速已超过巡航速度
-        output_a_target = 0.0 # 限制正向加速度目标为0，允许车辆自然减速
+        output_a_target = MIN_ACCEL # 限制为微弱减速，而不是0
     return output_a_target
 
   def set_enabled(self, enabled):

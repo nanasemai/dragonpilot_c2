@@ -237,7 +237,9 @@ class LongitudinalPlanner:
     self.j_desired_trajectory = np.interp(T_IDXS[:CONTROL_N], T_IDXS_MPC[:-1], self.mpc.j_solution)
 
     # Apply ACM post-processing to the acceleration trajectory if active
-    self.a_desired_trajectory = self.acm.update_a_desired_trajectory(self.a_desired_trajectory)
+    # 只在ACM开关打开时更新期望加速度轨迹
+    if self.acm.enabled:
+      self.a_desired_trajectory = self.acm.update_a_desired_trajectory(self.a_desired_trajectory)
     # TODO counter is only needed because radar is glitchy, remove once radar is gone
     self.fcw = self.mpc.crash_cnt > 5
     if self.fcw:
@@ -255,14 +257,24 @@ class LongitudinalPlanner:
     action_t = ((lower + upper) / 2.0) + DT_MDL  # 计算平均延迟加上模型时间步长
     output_a_target, self.output_should_stop = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory,
                                                                   action_t=action_t, vEgoStopping=self.CP.vEgoStopping)
-    # ACM处理和限制优化
-    output_a_target = self.acm.update_output_a_target(output_a_target)
+    
+    # 只在ACM开关打开时执行ACM相关操作
+    if self.acm.enabled:
+      # ACM处理和限制优化
+      output_a_target = self.acm.update_output_a_target(output_a_target)
+
     # 应用平滑限制
     accel_clip = accel_limits_turns.copy()
-    for idx in range(2):
-      accel_clip[idx] = np.clip(accel_clip[idx], self.prev_accel_clip[idx] - 0.05, self.prev_accel_clip[idx] + 0.05)
-    self.output_a_target = np.clip(output_a_target, accel_clip[0], accel_clip[1])
-    self.prev_accel_clip = accel_clip
+    # 如果ACM激活，使用ACM的输出值和限制
+    if self.acm.enabled and self.acm.active:
+      self.output_a_target = output_a_target
+      self.prev_accel_clip = accel_clip
+    else:
+      # 正常的平滑限制处理
+      for idx in range(2):
+          accel_clip[idx] = np.clip(accel_clip[idx], self.prev_accel_clip[idx] - 0.05, self.prev_accel_clip[idx] + 0.05)
+      self.output_a_target = np.clip(output_a_target, accel_clip[0], accel_clip[1])
+      self.prev_accel_clip = accel_clip
 
     # 改进的前车状态检测逻辑
     if self.lead_start_enabled and sm['radarState'].leadOne.status:
