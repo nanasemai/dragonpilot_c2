@@ -57,29 +57,37 @@ class Dashcamd:
 
     Path(self.video_dir).mkdir(parents=True, exist_ok=True)  # 确保目录存在
 
+    # 更新配置
+    if config:
+      self.update_config(config)
+
   def update_config(self, config):
       self.config.update(config)
       cloudlog.info(f"Dashcamd update_config - self.config['duration']: {self.config['duration']}") # 添加日志
 
       # 处理quality参数
       quality = self.config['quality']
+      determined_quality_string = "medium" # Default
       try:
           # 如果是数值，转换为字符串
           if isinstance(quality, int) or (isinstance(quality, str) and quality.isdigit()):
-              quality = int(quality)
-              quality = QUALITY_MAP.get(quality, "medium")
+              quality_int = int(quality)
+              determined_quality_string = QUALITY_MAP.get(quality_int, "medium")
+          elif isinstance(quality, str) and quality in QUALITY_PRESETS:
+              determined_quality_string = quality
       except (ValueError, TypeError):
-          quality = "medium"  # 默认中等质量
+          determined_quality_string = "medium"  # 默认中等质量
 
-      if quality not in QUALITY_PRESETS:
-          quality = "medium"
+      if determined_quality_string not in QUALITY_PRESETS:
+          determined_quality_string = "medium"
 
-      self.quality_settings = QUALITY_PRESETS[quality]
+      self.quality_settings = QUALITY_PRESETS[determined_quality_string]
+      # Store the determined string quality back into config for consistent access
+      self.config['quality'] = determined_quality_string # <-- Add this line
       self._update_storage_limits()
 
   def _update_storage_limits(self):
       self.DASHCAM_DURATION = self.config['duration']  # 直接使用配置值
-      cloudlog.info(f"Dashcamd _update_storage_limits - self.DASHCAM_DURATION: {self.DASHCAM_DURATION}")
       self.DASHCAM_BIT_RATES = self.quality_settings["bitrate"]
       self.DASHCAM_MAX_SIZE_PER_FILE = self.DASHCAM_BIT_RATES / 8 * self.DASHCAM_DURATION
       self.DASHCAM_FREESPACE_LIMIT = 20  # 20%空间预留
@@ -135,7 +143,8 @@ class Dashcamd:
     try:
       now = datetime.datetime.now()
       # 获取质量预设的英文名称
-      quality_name = self.quality_settings.get('name', self.config['quality'])
+      # quality_name = self.quality_settings.get('name', self.config['quality']) # Original line
+      quality_name = self.config['quality'] # Use the string stored in config
       file_name = f"dashcam_{now.strftime('%Y%m%d_%H%M%S')}_{self.session_id}_f{self.file_counter:04d}_{quality_name}"
       self.file_counter += 1
       full_path = os.path.join(self.video_dir, f"{file_name}.mp4")  # 使用self.video_dir替代DASHCAM_VIDEOS_PATH
@@ -153,7 +162,7 @@ class Dashcamd:
       # 启动录制进程
       self.current_process = subprocess.Popen(cmd, env=env)
 
-      quality_info = f"质量: {self.config['quality']}, 比特率: {self.DASHCAM_BIT_RATES}"
+      # quality_info = f"质量: {self.config['quality']}, 比特率: {self.DASHCAM_BIT_RATES}" # Original line
       # 可以改为使用质量名称
       quality_info = f"质量: {quality_name}, 比特率: {self.DASHCAM_BIT_RATES//1000000}Mbps"  # 更易读的比特率显示
       if self.quality_settings["resolution"]:
@@ -179,52 +188,73 @@ class Dashcamd:
   def _clean_up_space(self):
       with self.cleanup_lock:
           try:
-              # 只有空间不足时才清理，不单独因时间到就清理
+              current_time = time.time()
+              # 检查是否需要清理：空间不足 或 已用空间超过保留时长限制 或 超过清理间隔
               need_clean = (
                   self.free_space < self.DASHCAM_FREESPACE_LIMIT or
-                  self._get_used_space() > self.DASHCAM_KEPT_MIN_SIZE
+                  self._get_used_space() > self.DASHCAM_KEPT_MIN_SIZE or
+                  (current_time - self.last_clean_time > self.CLEAN_INTERVAL)
               )
-              # 如果空间充足但超过清理间隔，可以做一次轻量清理（如只删空文件），可选
-              if not need_clean and (time.time() - self.last_clean_time > self.CLEAN_INTERVAL):
-                  # 只清理空文件
+
+              if not need_clean:
+                  # 如果不需要清理，只清理空文件并返回
                   for f in os.listdir(self.video_dir):
                       full_path = os.path.join(self.video_dir, f)
                       if os.path.isfile(full_path) and os.path.getsize(full_path) == 0:
-                          os.remove(full_path)
+                          try:
+                              os.remove(full_path)
+                              cloudlog.info(f"已删除空文件: {full_path}")
+                          except Exception as e:
+                              cloudlog.error(f"删除空文件失败: {str(e)}")
                   return
 
-              if need_clean or (time.time() - self.last_clean_time > self.CLEAN_INTERVAL):
-                  files = []
-                  for f in os.listdir(self.video_dir):
-                      full_path = os.path.join(self.video_dir, f)
-                      if not os.path.isfile(full_path):
+              # 如果需要清理，获取文件列表并按修改时间排序
+              files = []
+              for f in os.listdir(self.video_dir):
+                  full_path = os.path.join(self.video_dir, f)
+                  if not os.path.isfile(full_path):
+                      continue
+                  try:
+                      stat = os.stat(full_path)
+                      if stat.st_size == 0:
+                          # 清理空文件
+                          os.remove(full_path)
+                          cloudlog.info(f"已删除空文件: {full_path}")
                           continue
+                      files.append((full_path, stat.st_mtime, stat.st_size))
+                  except Exception:
+                      continue
+
+              if files:
+                  files.sort(key=lambda x: x[1]) # 按修改时间排序，最早的在前
+
+                  # 确定需要释放多少空间
+                  # 目标是达到预留空间阈值 或 已用空间小于保留时长限制
+                  target_used_space = min(
+                      (100.0 - self.DASHCAM_FREESPACE_LIMIT) / 100.0 * self._get_total_space(), # 达到空间阈值所需的已用空间
+                      self.DASHCAM_KEPT_MIN_SIZE # 满足保留时长所需的最小已用空间
+                  )
+                  current_used_space = self._get_used_space()
+                  space_to_free = max(0, current_used_space - target_used_space)
+
+                  space_freed = 0
+                  for file_info in files:
+                      if space_freed >= space_to_free and self._get_used_space() <= target_used_space:
+                           break # 已经释放了足够的空间，或者已用空间已低于目标
                       try:
-                          stat = os.stat(full_path)
-                          if stat.st_size == 0:
-                              os.remove(full_path)
-                              continue
-                          files.append((full_path, stat.st_mtime, stat.st_size))
-                      except Exception:
+                          os.remove(file_info[0])
+                          space_freed += file_info[2]
+                          cloudlog.info(f"已删除旧文件: {file_info[0]}")
+                      except Exception as e:
+                          cloudlog.error(f"删除文件失败: {str(e)}")
+                          # 如果删除失败，可能需要跳过这个文件或者记录错误
                           continue
-                  if files:
-                      files.sort(key=lambda x: x[1])
-                      space_needed = self.DASHCAM_MAX_SIZE_PER_FILE * 5
-                      space_freed = 0
-                      for file_info in files:
-                          if space_freed >= space_needed:
-                              break
-                          try:
-                              os.remove(file_info[0])
-                              space_freed += file_info[2]
-                              cloudlog.info(f"已删除旧文件: {file_info[0]}")
-                          except Exception as e:
-                              cloudlog.error(f"删除文件失败: {str(e)}")
-                              continue
+
+              # 无论是否执行了删除旧文件，只要尝试了清理，就更新时间戳
+              self.last_clean_time = current_time
+
           except Exception as e:
               cloudlog.error(f"清理空间出错: {str(e)}")
-          finally:
-              self.last_clean_time = time.time()
 
   def _get_used_space(self):
     """获取已使用的空间大小"""
@@ -237,6 +267,15 @@ class Dashcamd:
     except Exception as e:
       cloudlog.error(f"计算空间使用出错: {str(e)}")
       return 0
+
+  def _get_total_space(self):
+      """获取总空间大小 (字节)"""
+      try:
+          statvfs = os.statvfs(self.video_dir)
+          return statvfs.f_blocks * statvfs.f_bsize
+      except Exception as e:
+          cloudlog.error(f"获取总空间出错: {str(e)}")
+          return 0
 
   def run(self, started=False, free_space=100.0):
     """运行行车记录仪
