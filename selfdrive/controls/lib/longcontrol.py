@@ -160,4 +160,9 @@ class LongControl:
 
     self.last_output_accel = clip(output_accel, accel_limits[0], accel_limits[1])
 
+    # 如果ACM激活且计算出的加速度非负，确保不会被负的下限强制减速
+    # 检查CP对象是否有acm属性，并且acm是否激活
+    if hasattr(self.CP, 'acm') and hasattr(self.CP.acm, 'active') and self.CP.acm.active and output_accel >= 0:
+        self.last_output_accel = max(output_accel, -0.05) # 确保至少为-0.05，允许微弱减速或滑行
+
     return self.last_output_accel

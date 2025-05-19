@@ -92,8 +92,6 @@ class LongitudinalPlanner:
     self.acm_downhill_param = False
     self.output_should_stop = False
     self.output_a_target = 0.0
-    self.acm_active = False
-    self.acm_downhill_only = False
 
     # mapd
     self.cruise_source = 'cruise'
@@ -163,6 +161,7 @@ class LongitudinalPlanner:
       self.read_param()
 
     # 在update方法中添加ACM控制逻辑
+    # 根据参数更新ACM的启用状态
     if not self.acm_enabled and self.acm_param:
       self.acm_enabled = True
       self.acm.set_enabled(True)
@@ -171,6 +170,9 @@ class LongitudinalPlanner:
     elif self.acm_enabled and not self.acm_param:
       self.acm_enabled = False
       self.acm.set_enabled(False)
+      # 当ACM禁用时，重置ACM状态，避免影响后续控制
+      self.acm.active = False
+      self.acm.just_disabled = True # 标记刚刚禁用，可能需要重置MPC状态
 
     if self.param_read_counter % 100 == 0:
       self.accel_controller.set_profile(self.params.get("dp_long_accel_profile", encoding='utf-8'))
@@ -247,7 +249,9 @@ class LongitudinalPlanner:
     self.a_desired_trajectory = self.a_desired_trajectory_full[:CONTROL_N]
     self.j_desired_trajectory = np.interp(ModelConstants.T_IDXS[:CONTROL_N], T_IDXS_MPC[:-1], self.mpc.j_solution)
 
-    self.a_desired_trajectory = self.acm.update_a_desired_trajectory(self.a_desired_trajectory)
+    # 只在ACM开关打开且ACM激活时处理加速度轨迹
+    if self.acm_enabled and self.acm.active:
+        self.a_desired_trajectory = self.acm.update_a_desired_trajectory(self.a_desired_trajectory)
 
     # TODO counter is only needed because radar is glitchy, remove once radar is gone
     self.fcw = self.mpc.crash_cnt > 2 and not sm['carState'].standstill
@@ -266,16 +270,23 @@ class LongitudinalPlanner:
     action_t = ((lower + upper) / 2.0) + DT_MDL  # 平均延迟加上模型时间步长
     output_a_target, self.output_should_stop = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory,
                                                                  action_t=action_t, vEgoStopping=self.CP.vEgoStopping)
-    # 先应用ACM处理
-    output_a_target = self.acm.update_output_a_target(output_a_target)
-    # 确保在基本限制范围内
-    output_a_target = clip(output_a_target, accel_limits[0], accel_limits[1])
-    # 应用转弯限制
+    # 只在ACM开关打开且ACM激活时执行ACM相关操作
+    if self.acm_enabled and self.acm.active:
+        # ACM处理和限制优化
+        output_a_target = self.acm.update_output_a_target(output_a_target)
+
+    # 应用平滑限制
     accel_clip = accel_limits_turns.copy()
-    for idx in range(2):
-        accel_clip[idx] = np.clip(accel_clip[idx], self.prev_accel_clip[idx] - 0.05, self.prev_accel_clip[idx] + 0.05)
-    self.output_a_target = np.clip(output_a_target, accel_clip[0], accel_clip[1])
-    self.prev_accel_clip = accel_clip
+    # 如果ACM激活，使用ACM的输出值和限制
+    if self.acm_enabled and self.acm.active: # 检查 LongitudinalPlanner 的 acm_enabled 标志和 ACM 对象的 active 状态
+        self.output_a_target = output_a_target
+        self.prev_accel_clip = accel_clip # 在ACM激活时，prev_accel_clip 应该更新为当前的 accel_clip
+    else:
+        # 正常的平滑限制处理
+        for idx in range(2):
+            accel_clip[idx] = np.clip(accel_clip[idx], self.prev_accel_clip[idx] - 0.05, self.prev_accel_clip[idx] + 0.05)
+        self.output_a_target = np.clip(output_a_target, accel_clip[0], accel_clip[1])
+        self.prev_accel_clip = accel_clip
 
   def publish(self, sm, pm):
     plan_send = messaging.new_message('longitudinalPlan')
@@ -303,6 +314,11 @@ class LongitudinalPlanner:
     plan_ext_send = messaging.new_message('longitudinalPlanExt')
 
     longitudinalPlanExt = plan_ext_send.longitudinalPlanExt
+
+    # 添加 ACM 状态
+    longitudinalPlanExt.acmEnabled = self.acm_enabled
+    longitudinalPlanExt.acmDownhillOnly = self.acm_downhill_param
+    longitudinalPlanExt.acmActive = self.acm.active
 
     longitudinalPlanExt.visionTurnControllerState = self.vision_turn_controller.state
     longitudinalPlanExt.visionTurnSpeed = float(self.vision_turn_controller.v_turn)
