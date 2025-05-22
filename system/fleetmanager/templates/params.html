@@ -1,0 +1,33 @@
+{% extends "layout.html" %}
+
+{% block title %}
+    参数管理
+{% endblock %}
+
+{% block main %}
+    <br>
+    <h1>参数列表</h1>
+    <br>
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead class="table-light">
+                <tr>
+                    <th>参数名</th>
+                    <th>中文名称</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for param in params %}
+                    <tr>
+                        <td>{{ param }}</td>
+                        <td>{{ get_param_description(param) }}</td>
+                        <td>
+                            <a href="/params/{{ param }}" class="btn btn-sm btn-outline-primary">编辑</a>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}

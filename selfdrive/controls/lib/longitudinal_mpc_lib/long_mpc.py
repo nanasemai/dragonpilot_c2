@@ -291,6 +291,7 @@ class LongitudinalMpc:
     self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
     self.reset()
     self.source = SOURCES[2]
+    self.target_obstacle_distance = float('nan')
 
   def reset(self):
     # self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
@@ -483,6 +484,11 @@ class LongitudinalMpc:
     self.params[:,2] = np.min(x_obstacles, axis=1)
     self.params[:,3] = np.copy(self.prev_a)
     self.params[:,4] = t_follow
+
+    # 更新期望跟车距离
+    min_obstacle_distance = np.min(x_obstacles, axis=1)
+    # 修改为只获取当前时刻的跟车距离（第一个元素）
+    self.target_obstacle_distance = min_obstacle_distance[0] if len(min_obstacle_distance) > 0 else float('nan')
 
     self.run()
     if (np.any(lead_xv_0[FCW_IDXS,0] - self.x_sol[FCW_IDXS,0] < CRASH_DISTANCE) and

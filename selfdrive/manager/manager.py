@@ -120,6 +120,7 @@ def manager_init() -> None:
     ("dp_device_go_off_road", "0"),  # 添加离线模式参数
     ("dp_lon_acm", "0"),
     ("dp_lon_acm_downhill", "0"),
+    ("dp_screenshotserver", "0"),
     # 添加前车起步提醒相关参数
     ("dp_lead_start_alert", "0"),  # 前车起步提醒功能开关，默认关闭
     ("dp_lead_start_alert_threshold", "3"),  # 前车起步速度阈值(m/s)x0.1 默认0.3 m/s

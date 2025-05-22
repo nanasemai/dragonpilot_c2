@@ -279,19 +279,15 @@ struct CarState {
   steeringRateLimitedDEPRECATED @29 :Bool;
   canMonoTimesDEPRECATED @12: List(UInt64);
 }
-
 # ******* radar state @ 20hz *******
-
 struct RadarData @0x888ad6581cf0aacb {
   errors @0 :List(Error);
   points @1 :List(RadarPoint);
-
   enum Error {
     canError @0;
     fault @1;
     wrongConfig @2;
   }
-
   # similar to LiveTracks
   # is one timestamp valid for all? I think so
   struct RadarPoint {
@@ -321,24 +317,18 @@ struct CarControl {
   enabled @0 :Bool;
   latActive @11: Bool;
   longActive @12: Bool;
-
   # Actuator commands as computed by controlsd
   actuators @6 :Actuators;
-
   leftBlinker @15: Bool;
   rightBlinker @16: Bool;
-
   # Any car specific rate limits or quirks applied by
   # the CarController are reflected in actuatorsOutput
   # and matches what is sent to the car
   actuatorsOutput @10 :Actuators;
-
   orientationNED @13 :List(Float32);
   angularVelocity @14 :List(Float32);
-
   cruiseControl @4 :CruiseControl;
   hudControl @5 :HUDControl;
-
   struct Actuators {
     # range from 0.0 - 1.0
     gas @0: Float32;
@@ -348,13 +338,10 @@ struct CarControl {
     # value sent over can to the car
     steerOutputCan @8: Float32;
     steeringAngleDeg @3: Float32;
-
     curvature @7: Float32;
-
     speed @6: Float32; # m/s
     accel @4: Float32; # m/s^2
     longControlState @5: LongControlState;
-
     enum LongControlState @0xe40f3a917d908282{
       off @0;
       pid @1;
@@ -399,7 +386,6 @@ struct CarControl {
 
     enum AudibleAlert {
       none @0;
-
       engage @1;
       disengage @2;
       refuse @3;

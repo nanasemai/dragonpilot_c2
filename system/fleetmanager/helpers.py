@@ -176,3 +176,126 @@ def list_files(path, single=False):
         return sorted(files, key=lambda x: x["name"], reverse=True)
     except Exception:
         return []
+
+
+PARAMS_PATH = os.path.join(str(Path.home()), ".comma", "params", "") if PC else "/data/params/d/"
+
+def read_param(param_name):
+    try:
+        with open(os.path.join(PARAMS_PATH, param_name), 'r') as f:
+            return f.read().strip()
+    except Exception:
+        return None
+
+def write_param(param_name, value):
+    try:
+        with open(os.path.join(PARAMS_PATH, param_name), 'w') as f:
+            f.write(value)
+        return True
+    except Exception:
+        return False
+
+def list_params():
+    try:
+        all_params = os.listdir(PARAMS_PATH)
+        return [f for f in all_params if os.path.isfile(os.path.join(PARAMS_PATH, f)) and f in PARAM_DESCRIPTIONS]
+    except Exception:
+        return []
+
+
+PARAM_DESCRIPTIONS = {
+    "dp_0813": "开启0813模型",
+    "dp_no_gps_ctrl": "禁用GPS控制功能",
+    "dp_no_fan_ctrl": "禁用风扇控制功能", 
+    "dp_logging": "日志记录开关",
+    "dp_device_no_ir_ctrl": "禁用红外控制功能",
+    "dp_alka": "ALKA模式开关",
+    "dp_mapd": "地图数据开关",
+    "dp_lat_lane_priority_mode": "车道优先级模式",
+    "dp_device_auto_shutdown": "设备自动关机设置",
+    "dp_device_auto_shutdown_in": "设备自动关机时间设置",
+    "dp_toyota_sng": "丰田停止前进功能",
+    "dp_toyota_enhanced_bsm": "丰田增强型盲点监测",
+    "dp_toyota_auto_lock": "丰田自动锁门功能",
+    "dp_toyota_auto_unlock": "丰田自动解锁功能",
+    "dp_device_audible_alert_mode": "设备声音警报模式",
+    "dp_device_disable_temp_check": "禁用设备温度检查",
+    "dp_car_dashcam_mode_removal": "强制移除Dashcam模式",
+    "dp_long_de2e": "纵向DE2E控制",
+    "dp_mapd_vision_turn_control": "地图视觉转向控制",
+    "dp_hkg_min_steer_speed_bypass": "现代/起亚最小转向速度绕过",
+    "dp_lat_lane_priority_mode_speed_based": "基于速度的车道优先级",
+    "dp_long_use_krkeegen_tune": "使用Krkeegen调校参数",
+    "dp_toyota_zss": "丰田ZSS转向传感器支持",
+    "dp_long_accel_btn": "纵向加速按钮设置",
+    "dp_long_personality_btn": "纵向个性按钮设置",
+    "dp_vag_timebomb_bypass": "VAG车型横向控制时间限制绕过",
+    "dp_lat_lane_change_assist_speed": "换道辅助激活速度",
+    "dp_long_missing_lead_warning": "前车丢失警告",
+    "dp_on_road_dashcam": "行车记录仪开关",
+    "dp_lateral_road_edge_detected": "道路边缘检测",
+    "dp_use_nnff": "神经网络前馈控制",
+    "dp_use_nnff_lite": "简化版神经网络控制",
+    "dp_dashcam_quality": "行车记录仪画质设置",
+    "dp_dashcam_duration": "行车记录仪录制时长",
+    "dp_dashcam_kept_hours": "行车记录仪保留时长",
+    "dp_torqued_override": "手动实时调教开关",
+    "dp_torque_lat_accel_factor": "最大横向加速度设置",
+    "dp_torque_friction": "转向摩擦力设置",
+    "dp_gpxd": "GPX数据记录开关",
+    "dp_dev_ui_info": "开发者UI信息显示设置",
+    "dp_device_display_off_mode": "设备显示屏关闭模式",
+    "dp_lat_lane_change_abort_check": "换道中止检查",
+    "dp_device_go_off_road": "设备离线模式",
+    "dp_lateral_camera_offset": "相机偏移量设置",
+    "dp_lateral_path_offset": "路径偏移量设置",
+    "dp_lateral_torque_kp": "PID实时P值设置",
+    "dp_lateral_torque_ki": "PID实时I值设置",
+    "dp_disable_gps": "禁用GPS功能", 
+    "dp_lon_acm": "纵向ACM控制",
+    "dp_lon_acm_downhill": "下坡纵向ACM控制",
+    "dp_lead_start_alert_threshold": "前车起步检测阈值(m/s)",
+    "dp_lead_stop_time_threshold": "前车停止时间阈值(s)",
+    "dp_lat_use_siglin": "BYD Siglin模式开关",
+    "BydModifiedStockLong": "BYD改进版原车纵向控制",
+    "BydUseRadar": "BYD使用雷达进行纵向控制"
+}
+
+def get_param_description(param_name):
+    return PARAM_DESCRIPTIONS.get(param_name, "未定义参数")
+
+
+PARAM_VALIDATORS = {
+    "dp_log_level": lambda v: v.isdigit() and 0 <= int(v) <= 4,
+    "dp_device_mode": lambda v: v.isdigit() and 0 <= int(v) <= 2,
+    "dp_dev_ui_info": lambda v: v.isdigit() and 0 <= int(v) <= 3,
+    "dp_dashcam_quality": lambda v: True,
+    "dp_dashcam_duration": lambda v: True, 
+    "dp_dashcam_kept_hours": lambda v: True,
+    "dp_alka": lambda v: v in ["0", "1"],
+    "dp_use_nnff": lambda v: v in ["0", "1"],
+    "dp_use_nnff_lite": lambda v: v in ["0", "1"],
+    "dp_torqued_override": lambda v: v in ["0", "1"],
+    "dp_show_date_time": lambda v: v in ["0", "1"],
+    "dp_lat_controller": lambda v: True, 
+    "dp_long_accel_profile": lambda v: True,  
+    "dp_lat_lane_priority_mode": lambda v: True, 
+    "dp_device_auto_shutdown": lambda v: v in ["0", "1"],
+    "dp_device_display_off_mode": lambda v: v in ["0", "1"],
+    "dp_lateral_camera_offset": lambda v: True, 
+    "dp_lateral_path_offset": lambda v: True, 
+    "dp_lateral_torque_kp": lambda v: True, 
+    "dp_lateral_torque_ki": lambda v: True, 
+    "dp_disable_gps": lambda v: v in ["0", "1"],
+    "dp_lead_start_alert": lambda v: v in ["0", "1"],
+    "dp_lead_start_alert_threshold": lambda v: True,
+    "dp_lead_stop_time_threshold": lambda v: True, 
+    "dp_lat_use_siglin": lambda v: v in ["0", "1"],
+    "BydModifiedStockLong": lambda v: v in ["0", "1"],
+    "BydUseRadar": lambda v: v in ["0", "1"]
+}
+
+def validate_param(param_name, value):
+    if param_name in PARAM_VALIDATORS:
+        return PARAM_VALIDATORS[param_name](value)
+    return True  # 默认允许所有参数

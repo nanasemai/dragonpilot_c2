@@ -53,6 +53,7 @@ struct LongitudinalPlanExt @0xaedffd8f31e7b55d {
   acmEnabled @15 :Bool;      # ACM 功能是否启用
   acmDownhillOnly @16 :Bool; # 是否仅在下坡时启用 ACM
   acmActive @17 :Bool;      # ACM 是否处于激活状态
+  desiredFollowDistance @18 :Float32; # 添加计算得到的期望跟车距离
 
   enum LongitudinalPlanExtSource {
     cruise @0;
