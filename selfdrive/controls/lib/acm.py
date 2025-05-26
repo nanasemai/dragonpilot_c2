@@ -20,10 +20,10 @@ RATIO = 0.9
 TTC = 5.  # 前车碰撞时间阈值(秒)
 # TTC_BP = [5.0, 3.0]  # 碰撞时间插值点 (旧)
 # MIN_BRAKE_ALLOW_VALS = [0., -0.5]  # 对应不同碰撞时间允许的最小刹车值 (旧)
-TTC_BP = [3.0, 5.0]  # 碰撞时间插值点 (修正为单调递增)
-MIN_BRAKE_ALLOW_VALS = [-0.5, -0.01]  # 对应不同碰撞时间允许的最小刹车值 (对应修正)
+TTC_BP = [2.5, 3.5]  # 碰撞时间插值点 (修正为单调递增)
+MIN_BRAKE_ALLOW_VALS = [-0.5, 0.0]  # 对应不同碰撞时间允许的最小刹车值 (对应修正)
 SPEED_THRESHOLD_FOR_ACCEL_LIMIT = 1 # 超速判断时，允许超过巡航速度的阈值 (m/s)，约等于 3.6 km/h
-MIN_ACCEL = -0.01  # 滑行时的最小减速度，避免ECU补油
+MIN_ACCEL = 0.0  # 滑行时的最小减速度，避免ECU补油
 
 class ACM:
   def __init__(self, enabled = False, downhill_only = False):
