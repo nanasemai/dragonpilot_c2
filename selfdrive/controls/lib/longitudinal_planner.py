@@ -120,6 +120,7 @@ class LongitudinalPlanner:
     self.dp_long_use_df_tune_active = False
     self.dp_long_use_krkeegen_tune = False
     self.dp_long_use_krkeegen_tune_active = False
+    self.desired_follow_distance = float('nan')  # 初始化为NaN表示无效值
 
   def read_param(self):
     try:
@@ -243,6 +244,9 @@ class LongitudinalPlanner:
     self.dp_long_use_df_tune_active = self.dp_long_use_df_tune and sm['radarState'].leadOne.status
     self.mpc.update(sm['carState'], sm['radarState'], v_cruise_sol, x, v, a, j, personality=self.personality, use_df_tune=self.dp_long_use_df_tune_active, use_krkeegen_tune=self.dp_long_use_krkeegen_tune_active)
 
+    # 更新期望跟车距离
+    self.desired_follow_distance = float(round(self.mpc.target_obstacle_distance, 1))
+
     self.v_desired_trajectory_full = np.interp(ModelConstants.T_IDXS, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory_full = np.interp(ModelConstants.T_IDXS, T_IDXS_MPC, self.mpc.a_solution)
     self.v_desired_trajectory = self.v_desired_trajectory_full[:CONTROL_N]
@@ -319,6 +323,8 @@ class LongitudinalPlanner:
     longitudinalPlanExt.acmEnabled = self.acm_enabled
     longitudinalPlanExt.acmDownhillOnly = self.acm_downhill_param
     longitudinalPlanExt.acmActive = self.acm.active
+    # 添加期望跟车距离
+    longitudinalPlanExt.desiredFollowDistance = self.desired_follow_distance
 
     longitudinalPlanExt.visionTurnControllerState = self.vision_turn_controller.state
     longitudinalPlanExt.visionTurnSpeed = float(self.vision_turn_controller.v_turn)

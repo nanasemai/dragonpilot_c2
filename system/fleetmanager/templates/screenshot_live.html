@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Comma UI Live View</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      margin: 0;
+      background: black;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: auto; /* 允许滚动 */
+    }
+    #ui-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      max-width: none;
+      max-height: none;
+    }
+    img {
+      width: 100%;
+      height: auto;
+      max-width: none;
+      max-height: none;
+      display: block;
+    }
+    .touch-indicator {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border: 2px solid #ff0000;
+      border-radius: 50%;
+      background: rgba(255, 0, 0, 0.2);
+      pointer-events: none;
+      transform: translate(-50%, -50%);
+      animation: fadeOut 0.5s ease-out forwards;
+    }
+    .drag-indicator {
+      position: absolute;
+      width: 4px;
+      background: #00ff00;
+      pointer-events: none;
+      opacity: 0.7;
+    }
+    @keyframes fadeOut {
+      0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+      100% { opacity: 0; transform: translate(-50%, -50%) scale(1.5); }
+    }
+    .status {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0,0,0,0.7);
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+    }
+    .instructions {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0,0,0,0.7);
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-family: Arial, sans-serif;
+      font-size: 12px;
+      max-width: 300px;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui-container">
+    <img src="/screenshot_live/screenshot?_t={{ timestamp }}" id="ui" /> {# Updated src path #}
+    <div class="status" id="status">Ready</div>
+    <div class="instructions">
+      <div>• 点击：单击/触摸</div>
+      <div>• 滚动：鼠标滚轮或双指滑动</div>
+      <div>• 拖动：按住并移动（用于滑块）</div>
+    </div>
+  </div>
+
+  <script>
+    let img = document.getElementById("ui");
+    let container = document.getElementById("ui-container");
+    let status = document.getElementById("status");
+
+    let isDragging = false;
+    let dragStart = {x: 0, y: 0};
+    let lastTouchTime = 0;
+    let lastTouchCoords = null; // Track last touch coordinates for dragend
+
+    // Helper function to get image size from filename
+    function getImgSizeFromFilename(filename) {
+      const match = filename.match(/_(\d+)x(\d+)\.png$/);
+      if (match) {
+        return {img_w: parseInt(match[1], 10), img_h: parseInt(match[2], 10)};
+      }
+      return {img_w: null, img_h: null};
+    }
+
+    // Helper function to show touch indicator
+    function showTouchIndicator(x, y) {
+      let indicator = document.createElement('div');
+      indicator.className = 'touch-indicator';
+      indicator.style.left = x + 'px';
+      indicator.style.top = y + 'px';
+      container.appendChild(indicator);
+
+      setTimeout(() => {
+        container.removeChild(indicator);
+      }, 500);
+    }
+
+    // Helper function to get device coordinates based on image scaling
+    function getDeviceCoordinates(clientX, clientY) {
+      let rect = img.getBoundingClientRect();
+      // Use naturalWidth/naturalHeight for actual image dimensions
+      let relX = (clientX - rect.left) / rect.width;
+      let relY = (clientY - rect.top) / rect.height;
+      return {
+        x: Math.round(relX * img.naturalWidth),
+        y: Math.round(relY * img.naturalHeight),
+        rectX: clientX - rect.left, // Coordinates relative to the image element for indicator
+        rectY: clientY - rect.top
+      };
+    }
+
+    // Helper function to send event to backend
+    function sendEvent(eventData) {
+      fetch('/screenshot_live/input', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(eventData)
+      }).catch(err => {
+        console.error('Event send failed:', err);
+        status.textContent = 'Send failed';
+      });
+    }
+
+    // Refresh image
+    setInterval(() => {
+      img.src = "/screenshot_live/screenshot?_t=" + Date.now();
+    }, 1000);
+
+    // Mouse wheel scrolling (desktop)
+    img.addEventListener('wheel', function(e) {
+      e.preventDefault();
+      let coords = getDeviceCoordinates(e.clientX, e.clientY);
+
+      let deltaY = e.deltaY;
+      let scrollDirection = deltaY > 0 ? 'down' : 'up';
+      let scrollAmount = Math.abs(deltaY);
+
+      status.textContent = `Scroll ${scrollDirection} (${scrollAmount})`;
+
+      // Get image size for scroll event
+      const src = img.src;
+      const filename = src.substring(src.lastIndexOf('/') + 1).split('?')[0];
+      const {img_w, img_h} = getImgSizeFromFilename(filename);
+
+      sendEvent({
+        type: 'scroll',
+        x: coords.x,
+        y: coords.y,
+        deltaY: deltaY,
+        direction: scrollDirection,
+        amount: scrollAmount,
+        img_w: img_w, // Include image width
+        img_h: img_h  // Include image height
+      });
+    });
+
+    // Touch events for mobile
+    let touchStartTime = 0;
+    let initialTouch = null;
+
+    img.addEventListener('touchstart', function(e) {
+      e.preventDefault();
+      touchStartTime = Date.now();
+
+      if (e.touches.length === 1) {
+        // Single touch - potential tap or drag
+        initialTouch = e.touches[0];
+        let coords = getDeviceCoordinates(initialTouch.clientX, initialTouch.clientY);
+        lastTouchCoords = coords; // Store initial touch coords
+
+        dragStart = {x: coords.x, y: coords.y};
+        isDragging = false;
+
+        // Get image size for touchstart event
+        const src = img.src;
+        const filename = src.substring(src.lastIndexOf('/') + 1).split('?')[0];
+        const {img_w, img_h} = getImgSizeFromFilename(filename);
+
+        sendEvent({
+          type: 'touchstart',
+          x: coords.x,
+          y: coords.y,
+          img_w: img_w, // Include image width
+          img_h: img_h  // Include image height
+        });
+      } else if (e.touches.length === 2) {
+        // Two finger touch - prepare for scroll
+        status.textContent = 'Two finger scroll mode';
+      }
+    });
+
+    img.addEventListener('touchmove', function(e) {
+      e.preventDefault();
+
+      if (e.touches.length === 1 && initialTouch) {
+        // Single finger drag
+        let touch = e.touches[0];
+        let coords = getDeviceCoordinates(touch.clientX, touch.clientY);
+        lastTouchCoords = coords; // Update last touch coords
+
+        let deltaX = coords.x - dragStart.x;
+        let deltaY = coords.y - dragStart.y;
+        let distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+        if (distance > 10 && !isDragging) {
+          // Start dragging
+          isDragging = true;
+          status.textContent = 'Dragging...';
+        }
+
+        if (isDragging) {
+          // Get image size for drag event
+          const src = img.src;
+          const filename = src.substring(src.lastIndexOf('/') + 1).split('?')[0];
+          const {img_w, img_h} = getImgSizeFromFilename(filename);
+
+          sendEvent({
+            type: 'drag',
+            x: coords.x,
+            y: coords.y,
+            startX: dragStart.x,
+            startY: dragStart.y,
+            deltaX: deltaX,
+            deltaY: deltaY,
+            img_w: img_w, // Include image width
+            img_h: img_h  // Include image height
+          });
+        }
+      } else if (e.touches.length === 2) {
+        // Two finger scroll
+        let touch1 = e.touches[0];
+        let touch2 = e.touches[1];
+
+        // Calculate center point
+        let centerX = (touch1.clientX + touch2.clientX) / 2;
+        let centerY = (touch1.clientY + touch2.clientY) / 2;
+        let coords = getDeviceCoordinates(centerX, centerY);
+
+        // Calculate vertical movement for scrolling
+        let currentY = (touch1.clientY + touch2.clientY) / 2;
+        if (this.lastTwoFingerY !== undefined) {
+          let deltaY = currentY - this.lastTwoFingerY;
+          let scrollDirection = deltaY > 0 ? 'down' : 'up';
+
+          status.textContent = `Two-finger scroll ${scrollDirection}`;
+
+          // Get image size for scroll event
+          const src = img.src;
+          const filename = src.substring(src.lastIndexOf('/') + 1).split('?')[0];
+          const {img_w, img_h} = getImgSizeFromFilename(filename);
+
+          sendEvent({
+            type: 'scroll',
+            x: coords.x,
+            y: coords.y,
+            deltaY: deltaY * 3, // Amplify for better sensitivity
+            direction: scrollDirection,
+            amount: Math.abs(deltaY * 3),
+            img_w: img_w, // Include image width
+            img_h: img_h  // Include image height
+          });
+        }
+        this.lastTwoFingerY = currentY;
+      }
+    });
+
+    img.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      let touchDuration = Date.now() - touchStartTime;
+
+      if (e.touches.length === 0) { // All fingers lifted
+        let finalCoords = null;
+        if (e.changedTouches.length > 0) {
+           finalCoords = getDeviceCoordinates(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+        } else if (lastTouchCoords) {
+           finalCoords = lastTouchCoords; // Fallback to last known position
+        } else {
+           finalCoords = dragStart; // Fallback to drag start if no other info
+        }
+
+
+        if (!isDragging && touchDuration < 300 && finalCoords) {
+          // Quick tap
+          status.textContent = `Tap: ${finalCoords.x}, ${finalCoords.y}`;
+          showTouchIndicator(finalCoords.rectX, finalCoords.rectY);
+
+          // Get image size for tap event
+          const src = img.src;
+          const filename = src.substring(src.lastIndexOf('/') + 1).split('?')[0];
+          const {img_w, img_h} = getImgSizeFromFilename(filename);
+
+          sendEvent({
+            type: 'tap',
+            x: finalCoords.x,
+            y: finalCoords.y,
+            img_w: img_w, // Include image width
+            img_h: img_h  // Include image height
+          });
+        } else if (isDragging && finalCoords) {
+          // End drag
+          // Get image size for dragend event
+          const src = img.src;
+          const filename = src.substring(src.lastIndexOf('/') + 1).split('?')[0];
+          const {img_w, img_h} = getImgSizeFromFilename(filename);
+
+          sendEvent({
+            type: 'dragend',
+            x: finalCoords.x,
+            y: finalCoords.y,
+            img_w: img_w, // Include image width
+            img_h: img_h  // Include image height
+          });
+        }
+
+        isDragging = false;
+        initialTouch = null;
+        lastTouchCoords = null;
+        this.lastTwoFingerY = undefined;
+        status.textContent = 'Ready';
+      }
+    });
+
+    // Mouse events for desktop
+    img.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+      if (e.button === 0) { // Left button
+        let coords = getDeviceCoordinates(e.clientX, e.clientY);
+        dragStart = {x: coords.x, y: coords.y};
+        isDragging = false;
+
+        // Get image size for mousedown event
+        const src = img.src;
+        const filename = src.substring(src.lastIndexOf('/') + 1).split('?')[0];
+        const {img_w, img_h} = getImgSizeFromFilename(filename);
+
+        sendEvent({
+          type: 'mousedown',
+          x: coords.x,
+          y: coords.y,
+          img_w: img_w, // Include image width
+          img_h: img_h  // Include image height
+        });
+      }
+    });
+
+    img.addEventListener('mousemove', function(e) {
+      if (e.buttons === 1) { // Left button held
+        let coords = getDeviceCoordinates(e.clientX, e.clientY);
+
+        let deltaX = coords.x - dragStart.x;
+        let deltaY = coords.y - dragStart.y;
+        let distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+        // 增加判断拖动的距离阈值
+        if (distance > 10 && !isDragging) { // 原始代码: distance > 5
+          isDragging = true;
+          status.textContent = 'Dragging...';
+        }
+
+        if (isDragging) {
+          // Get image size for drag event
+          const src = img.src;
+          const filename = src.substring(src.lastIndexOf('/') + 1).split('?')[0];
+          const {img_w, img_h} = getImgSizeFromFilename(filename);
+
+          sendEvent({
+            type: 'drag',
+            x: coords.x,
+            y: coords.y,
+            startX: dragStart.x,
+            startY: dragStart.y,
+            deltaX: deltaX,
+            deltaY: deltaY,
+            img_w: img_w, // Include image width
+            img_h: img_h  // Include image height
+          });
+        }
+      }
+    });
+
+    img.addEventListener('mouseup', function(e) {
+      e.preventDefault();
+      if (e.button === 0) { // Left button
+        let coords = getDeviceCoordinates(e.clientX, e.clientY);
+
+        if (!isDragging) {
+          // Simple click
+          status.textContent = `Click: ${coords.x}, ${coords.y}`;
+          showTouchIndicator(coords.rectX, coords.rectY);
+
+          // Get image size for click event
+          const src = img.src;
+          const filename = src.substring(src.lastIndexOf('/') + 1).split('?')[0];
+          const {img_w, img_h} = getImgSizeFromFilename(filename);
+
+          sendEvent({
+            type: 'click',
+            x: coords.x,
+            y: coords.y,
+            img_w: img_w, // Include image width
+            img_h: img_h  // Include image height
+          });
+        } else {
+          // End drag
+          // status.textContent = 'Ready'; // Update status immediately on mouseup after drag // 原始代码
+          // Get image size for dragend event
+          const src = img.src;
+          const filename = src.substring(src.lastIndexOf('/') + 1).split('?')[0];
+          const {img_w, img_h} = getImgSizeFromFilename(filename);
+
+          sendEvent({
+            type: 'dragend',
+            x: coords.x, // Use final mouse position
+            y: coords.y,
+            img_w: img_w, // Include image width
+            img_h: img_h  // Include image height
+          });
+        }
+
+        isDragging = false;
+        status.textContent = 'Ready'; // Always reset status on mouseup
+      }
+    });
+
+    // Prevent context menu
+    img.addEventListener('contextmenu', function(e) {
+      e.preventDefault();
+    });
+  </script>
+</body>
+</html>

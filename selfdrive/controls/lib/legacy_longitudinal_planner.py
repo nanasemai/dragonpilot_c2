@@ -135,6 +135,7 @@ class LongitudinalPlanner:
     self.lead_started = False      # 前车起步状态
     self.lead_start_threshold = 0.3  # 默认0.3 m/s
     self.lead_stop_threshold = 3.0   # 默认3.0秒
+    self.desired_follow_distance = float('nan')  # 初始化为NaN表示无效值
 
   def read_param(self):
     try:
@@ -231,6 +232,8 @@ class LongitudinalPlanner:
     self.dp_long_use_df_tune_active = self.dp_long_use_df_tune and sm['radarState'].leadOne.status
     # 更新MPC控制器
     self.mpc.update(sm['carState'], sm['radarState'], v_cruise_sol, personality=self.personality, use_df_tune=self.dp_long_use_df_tune_active, use_krkeegen_tune=self.dp_long_use_krkeegen_tune_active)
+    # 更新期望跟车距离
+    self.desired_follow_distance = float(round(self.mpc.target_obstacle_distance, 1))
     # 生成控制轨迹
     self.v_desired_trajectory = np.interp(T_IDXS[:CONTROL_N], T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(T_IDXS[:CONTROL_N], T_IDXS_MPC, self.mpc.a_solution)
@@ -339,6 +342,8 @@ class LongitudinalPlanner:
     longitudinalPlanExt.acmEnabled = self.acm_enabled
     longitudinalPlanExt.acmDownhillOnly = self.acm_downhill_param
     longitudinalPlanExt.acmActive = self.acm.active
+    # 添加期望跟车距离
+    longitudinalPlanExt.desiredFollowDistance = self.desired_follow_distance
 
     longitudinalPlanExt.visionTurnControllerState = self.vision_turn_controller.state
     longitudinalPlanExt.visionTurnSpeed = float(self.vision_turn_controller.v_turn)

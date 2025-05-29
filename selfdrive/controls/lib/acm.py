@@ -12,18 +12,17 @@
 #
 # Downhill Coasting allows the vehicle to maintain or slightly increase speed on downhill slopes without braking.
 import numpy as np
+from common.params import Params
 # 坡度阈值，当sin(pitch)小于此值时判定为下坡
 SLOPE = -0.04
 # 车速比例阈值，当前车速超过巡航速度*RATIO时判定为超速
 RATIO = 0.9
 # 前车碰撞时间(TTC)相关参数
 TTC = 5.  # 前车碰撞时间阈值(秒)
-# TTC_BP = [5.0, 3.0]  # 碰撞时间插值点 (旧)
-# MIN_BRAKE_ALLOW_VALS = [0., -0.5]  # 对应不同碰撞时间允许的最小刹车值 (旧)
-TTC_BP = [3.0, 5.0]  # 碰撞时间插值点 (修正为单调递增)
+TTC_BP = [2.5, 3.5]  # 碰撞时间插值点 (修正为单调递增)
 MIN_BRAKE_ALLOW_VALS = [-0.5, 0.0]  # 对应不同碰撞时间允许的最小刹车值 (对应修正)
-SPEED_THRESHOLD_FOR_ACCEL_LIMIT = 0.5 # 超速判断时，允许超过巡航速度的阈值 (m/s)，约等于 1.8 km/h
-MIN_ACCEL = -0.05  # 滑行时的最小减速度，避免ECU补油
+SPEED_THRESHOLD_FOR_ACCEL_LIMIT = 1 # 超速判断时，允许超过巡航速度的阈值 (m/s)，约等于 3.6 km/h
+MIN_ACCEL = min(max(float(Params().get("dp_lon_acm_min_accel", encoding="utf8")) * 0.01, -0.5), 0.5)  # 滑行时的最小减速度，从参数获取并乘以0.01，限制在-0.5到0.5之间
 
 class ACM:
   def __init__(self, enabled = False, downhill_only = False):
@@ -120,8 +119,8 @@ class ACM:
           a_desired_trajectory[i] = MIN_ACCEL  # 选择微弱减速，而不是滑行
         else:  # 如果系统请求的刹车力度大于或等于允许的最小刹车值 (accel_val <= self.allowed_brake_val)
           a_desired_trajectory[i] = self.allowed_brake_val  # 将刹车力度限制在允许的最大值
-      elif accel_val > 0 and self.v_ego > (self.v_cruise + SPEED_THRESHOLD_FOR_ACCEL_LIMIT): # 如果系统希望加速，且当前车速已超过巡航速度
-        a_desired_trajectory[i] = MIN_ACCEL # 限制为微弱减速，而不是0    
+      # elif accel_val > 0 and self.v_ego > (self.v_cruise + SPEED_THRESHOLD_FOR_ACCEL_LIMIT): # 如果系统希望加速，且当前车速已超过巡航速度
+      #   a_desired_trajectory[i] = MIN_ACCEL # 限制为微弱减速，而不是0    
     return a_desired_trajectory
 
   def update_output_a_target(self, output_a_target):
@@ -141,8 +140,8 @@ class ACM:
             output_a_target = MIN_ACCEL  # 选择微弱减速，而不是滑行
         else:  # 如果系统请求的刹车力度大于或等于允许的最小刹车值 (output_a_target <= self.allowed_brake_val)
             output_a_target = self.allowed_brake_val  # 将刹车力度限制在允许的最大值
-    elif self.active and output_a_target > 0 and self.v_ego > (self.v_cruise + SPEED_THRESHOLD_FOR_ACCEL_LIMIT): # ACM激活，系统请求加速，且当前车速已超过巡航速度
-        output_a_target = MIN_ACCEL # 限制为微弱减速，而不是0
+    # elif self.active and output_a_target > 0 and self.v_ego > (self.v_cruise + SPEED_THRESHOLD_FOR_ACCEL_LIMIT): # ACM激活，系统请求加速，且当前车速已超过巡航速度
+    #     output_a_target = MIN_ACCEL # 限制为微弱减速，而不是0
     return output_a_target
 
   def set_enabled(self, enabled):

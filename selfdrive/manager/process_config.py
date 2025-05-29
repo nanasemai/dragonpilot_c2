@@ -51,7 +51,6 @@ procs = [
   PythonProcess("logmessaged", "system.logmessaged", always_run),
   # PythonProcess("micd", "system.micd", callback=iscar),
   # PythonProcess("timezoned", "system.timezoned", enabled=not PC, offroad=True),
-
   DaemonProcess("manage_athenad", "selfdrive.athena.manage_athenad", "AthenadPid"),
   NativeProcess("dmonitoringmodeld", "selfdrive/hybrid_modeld", ["./dmonitoringmodeld"], driverview, enabled=(not PC or WEBCAM) and not NO_IR_CTRL),
   # NativeProcess("encoderd", "system/loggerd", ["./encoderd"]),
@@ -84,17 +83,15 @@ procs = [
   PythonProcess("updated", "selfdrive.updated", only_offroad, enabled=not PC),
   PythonProcess("uploader", "selfdrive.loggerd.uploader", only_offroad),
   # PythonProcess("statsd", "selfdrive.statsd", offroad=True),
-
   # debug procs
   NativeProcess("bridge", "cereal/messaging", ["./bridge"], notcar),
   # rick - webjoystick needs aiohttp, install additional modules manually: pip install aiohttp aiortc
   # PythonProcess("webjoystick", "tools.bodyteleop.web", onroad=False, callback=notcar),
-  PythonProcess("fleet_manager", "system.fleetmanager.fleet_manager", only_offroad),
+  PythonProcess("fleet_manager", "system.fleetmanager.fleet_manager", always_run),
   # EON only
   PythonProcess("rtshield", "selfdrive.rtshield", only_onroad, enabled=EON),
   PythonProcess("shutdownd", "system.hardware.eon.shutdownd", only_onroad, enabled=EON),
   PythonProcess("androidd", "system.hardware.eon.androidd", always_run, enabled=EON),
-
   # mapd
   PythonProcess("mapd", "selfdrive.mapd.mapd", only_onroad),
   # dashcam
