@@ -122,6 +122,9 @@ def manager_init() -> None:
     ("dp_lon_acm", "0"),
     ("dp_lon_acm_downhill", "0"),
     ("dp_lon_acm_min_accel", "0"),#ACM滑行最小减速度参数，0表示默认不加速不减速
+    ("dp_vt_sensitivity", "10"),  # 弯道灵敏度系数，默认1.0（UI值是实际值的10倍）
+    ("dp_vt_decel_ratio", "10"),  # 弯道减速强度系数，默认1.0（UI值是实际值的10倍）
+    ("dp_vt_speed_ratio", "10"),  # 弯道速度系数，默认1.0（UI值是实际值的10倍）
     ("dp_screenshotserver", "0"),
     # 添加前车起步提醒相关参数
     ("dp_lead_start_alert", "0"),  # 前车起步提醒功能开关，默认关闭

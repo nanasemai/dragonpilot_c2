@@ -2,22 +2,20 @@ import numpy as np
 import math
 from cereal import custom
 from openpilot.common.numpy_fast import interp
-# from openpilot.common.params import Params
-# from common.realtime import sec_since_boot
+from common.params import Params  # 添加导入
 from openpilot.common.conversions import Conversions as CV
-# from selfdrive.controls.lib.lane_planner import TRAJECTORY_SIZE
 from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX
 import cereal.messaging as messaging
 
 TRAJECTORY_SIZE = 33
 _MIN_V = 5.6  # Do not operate under 20km/h
 
+# 原始常量保留，但会被参数覆盖
 _ENTERING_PRED_LAT_ACC_TH = 1.3  # Predicted Lat Acc threshold to trigger entering turn state.
 _ABORT_ENTERING_PRED_LAT_ACC_TH = 1.1  # Predicted Lat Acc threshold to abort entering state if speed drops.
 
-_TURNING_LAT_ACC_TH = 1.6  # Lat Acc threshold to trigger turning turn state.
-
-_LEAVING_LAT_ACC_TH = 1.3  # Lat Acc threshold to trigger leaving turn state.
+_TURNING_LAT_ACC_TH = 1.3  # Lat Acc threshold to trigger turning turn state.
+_LEAVING_LAT_ACC_TH = 1.2  # Lat Acc threshold to trigger leaving turn state.
 _FINISH_LAT_ACC_TH = 1.1  # Lat Acc threshold to trigger end of turn cycle.
 
 _EVAL_STEP = 5.  # mts. Resolution of the curvature evaluation.
@@ -94,7 +92,7 @@ def _description_for_state(turn_controller_state):
 
 class VisionTurnController():
   def __init__(self, CP):
-    # self._params = Params()
+    self._params = Params()  # 实例化参数
     self._CP = CP
     self._op_enabled = False
     self._gas_pressed = False
@@ -107,8 +105,59 @@ class VisionTurnController():
     self._v_overshoot = 0.
     self._state = VisionTurnControllerState.disabled
     self._sm = messaging.SubMaster(['lateralPlanExt'])
-
+    
+    # 初始化自定义参数
+    self.turn_sensitivity = 1.0  # 弯道检测灵敏度系数
+    self.decel_ratio = 1.0  # 减速强度系数
+    self.turn_speed_ratio = 1.0  # 弯道速度系数
+    
+    # 应用参数调整后的实际值
+    self.entering_lat_acc_th = _ENTERING_PRED_LAT_ACC_TH
+    self.abort_entering_lat_acc_th = _ABORT_ENTERING_PRED_LAT_ACC_TH
+    self.entering_smooth_decel_v = _ENTERING_SMOOTH_DECEL_V.copy()
+    self.turning_acc_v = _TURNING_ACC_V.copy()
+    
+    # 读取参数
+    self._update_params()
+    
     self._reset()
+
+  def _update_params(self):
+    """读取并更新UI参数"""
+    try:
+      # 读取弯道检测灵敏度系数 (UI值的0.1倍)
+      self.turn_sensitivity = self._params.get_float("dp_vt_sensitivity") / 10.0
+      if self.turn_sensitivity <= 0.1:  # 防止值过小
+        self.turn_sensitivity = 1.0
+        
+      # 读取减速强度系数 (UI值的0.1倍)
+      self.decel_ratio = self._params.get_float("dp_vt_decel_ratio") / 10.0
+      if self.decel_ratio <= 0.1:  # 防止值过小
+        self.decel_ratio = 1.0
+        
+      # 读取弯道速度系数 (UI值的0.1倍)
+      self.turn_speed_ratio = self._params.get_float("dp_vt_speed_ratio") / 10.0
+      if self.turn_speed_ratio <= 0.1:  # 防止值过小
+        self.turn_speed_ratio = 1.0
+      
+      # 应用参数到实际值
+      # 灵敏度调整 - 值越小越灵敏
+      self.entering_lat_acc_th = _ENTERING_PRED_LAT_ACC_TH / self.turn_sensitivity
+      self.abort_entering_lat_acc_th = _ABORT_ENTERING_PRED_LAT_ACC_TH / self.turn_sensitivity
+      
+      # 减速强度调整 - 值越大减速越强
+      self.entering_smooth_decel_v = [v * self.decel_ratio for v in _ENTERING_SMOOTH_DECEL_V]
+      self.turning_acc_v = [v * self.decel_ratio if v < 0 else v for v in _TURNING_ACC_V]
+      
+    except Exception:
+      # 出错时使用默认值
+      self.turn_sensitivity = 1.0
+      self.decel_ratio = 1.0
+      self.turn_speed_ratio = 1.0
+      self.entering_lat_acc_th = _ENTERING_PRED_LAT_ACC_TH
+      self.abort_entering_lat_acc_th = _ABORT_ENTERING_PRED_LAT_ACC_TH
+      self.entering_smooth_decel_v = _ENTERING_SMOOTH_DECEL_V.copy()
+      self.turning_acc_v = _TURNING_ACC_V.copy()
 
   @property
   def state(self):
@@ -223,16 +272,16 @@ class VisionTurnController():
       # Do not enter a turn control cycle if speed is low.
       if self._v_ego <= _MIN_V:
         pass
-      # If substantial lateral acceleration is predicted ahead, then move to Entering turn state.
-      elif self._max_pred_lat_acc >= _ENTERING_PRED_LAT_ACC_TH:
+      # 使用调整后的阈值
+      elif self._max_pred_lat_acc >= self.entering_lat_acc_th:
         self.state = VisionTurnControllerState.entering
     # ENTERING
     elif self.state == VisionTurnControllerState.entering:
       # Transition to Turning if current lateral acceleration is over the threshold.
       if self._current_lat_acc >= _TURNING_LAT_ACC_TH:
         self.state = VisionTurnControllerState.turning
-      # Abort if the predicted lateral acceleration drops
-      elif self._max_pred_lat_acc < _ABORT_ENTERING_PRED_LAT_ACC_TH:
+      # 使用调整后的阈值
+      elif self._max_pred_lat_acc < self.abort_entering_lat_acc_th:
         self.state = VisionTurnControllerState.disabled
     # TURNING
     elif self.state == VisionTurnControllerState.turning:
@@ -251,26 +300,23 @@ class VisionTurnController():
   def _update_solution(self):
     # DISABLED
     if self.state == VisionTurnControllerState.disabled:
-      # when not overshooting, calculate v_turn as the speed at the prediction horizon when following
-      # the smooth deceleration.
       a_target = self._a_ego
     # ENTERING
     elif self.state == VisionTurnControllerState.entering:
-      # when not overshooting, target a smooth deceleration in preparation for a sharp turn to come.
-      a_target = interp(self._max_pred_lat_acc, _ENTERING_SMOOTH_DECEL_BP, _ENTERING_SMOOTH_DECEL_V)
+      # 使用调整后的减速值
+      a_target = interp(self._max_pred_lat_acc, _ENTERING_SMOOTH_DECEL_BP, self.entering_smooth_decel_v)
       if self._lat_acc_overshoot_ahead:
-        # when overshooting, target the acceleration needed to achieve the overshoot speed at
-        # the required distance
-        a_target = min((self._v_overshoot**2 - self._v_ego**2) / (2 * self._v_overshoot_distance), a_target)
+        # 应用弯道速度系数调整目标速度
+        v_overshoot_adjusted = self._v_overshoot * self.turn_speed_ratio
+        a_target = min((v_overshoot_adjusted**2 - self._v_ego**2) / (2 * self._v_overshoot_distance), a_target)
       _debug(f'TVC Entering: Overshooting: {self._lat_acc_overshoot_ahead}')
       _debug(f'    Decel: {a_target:.2f}, target v: {self.v_turn * CV.MS_TO_KPH}')
     # TURNING
     elif self.state == VisionTurnControllerState.turning:
-      # When turning we provide a target acceleration that is confortable for the lateral accelearation felt.
-      a_target = interp(self._current_lat_acc, _TURNING_ACC_BP, _TURNING_ACC_V)
+      # 使用调整后的加速度值
+      a_target = interp(self._current_lat_acc, _TURNING_ACC_BP, self.turning_acc_v)
     # LEAVING
     elif self.state == VisionTurnControllerState.leaving:
-      # When leaving we provide a confortable acceleration to regain speed.
       a_target = _LEAVING_ACC
 
     # update solution values.
@@ -283,7 +329,8 @@ class VisionTurnController():
     self._a_ego = a_ego
     self._v_cruise_setpoint = v_cruise_setpoint
 
-    # self._update_params()
+    # 定期更新参数
+    self._update_params()
     self._update_calculations(sm)
     self._state_transition()
     self._update_solution()
