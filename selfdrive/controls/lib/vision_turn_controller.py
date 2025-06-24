@@ -10,36 +10,36 @@ import cereal.messaging as messaging
 TRAJECTORY_SIZE = 33
 _MIN_V = 5.6  # Do not operate under 20km/h
 
-# 原始常量保留，但会被参数覆盖
-_ENTERING_PRED_LAT_ACC_TH = 1.3  # Predicted Lat Acc threshold to trigger entering turn state.
-_ABORT_ENTERING_PRED_LAT_ACC_TH = 1.1  # Predicted Lat Acc threshold to abort entering state if speed drops.
+# 原始常量保留，但会被参数覆盖 - 优化后的默认值更加灵敏
+_ENTERING_PRED_LAT_ACC_TH = 1.0  # Predicted Lat Acc threshold to trigger entering turn state. (降低阈值提高灵敏度)
+_ABORT_ENTERING_PRED_LAT_ACC_TH = 0.8  # Predicted Lat Acc threshold to abort entering state if speed drops. (降低阈值)
 
-_TURNING_LAT_ACC_TH = 1.3  # Lat Acc threshold to trigger turning turn state.
-_LEAVING_LAT_ACC_TH = 1.2  # Lat Acc threshold to trigger leaving turn state.
-_FINISH_LAT_ACC_TH = 1.1  # Lat Acc threshold to trigger end of turn cycle.
+_TURNING_LAT_ACC_TH = 1.0  # Lat Acc threshold to trigger turning turn state. (降低阈值)
+_LEAVING_LAT_ACC_TH = 0.9  # Lat Acc threshold to trigger leaving turn state. (降低阈值)
+_FINISH_LAT_ACC_TH = 0.8  # Lat Acc threshold to trigger end of turn cycle. (降低阈值)
 
-_EVAL_STEP = 5.  # mts. Resolution of the curvature evaluation.
-_EVAL_START = 20.  # mts. Distance ahead where to start evaluating vision curvature.
-_EVAL_LENGHT = 150.  # mts. Distance ahead where to stop evaluating vision curvature.
+_EVAL_STEP = 4.  # mts. Resolution of the curvature evaluation. (提高分辨率)
+_EVAL_START = 15.  # mts. Distance ahead where to start evaluating vision curvature. (提前开始评估)
+_EVAL_LENGHT = 180.  # mts. Distance ahead where to stop evaluating vision curvature. (延长评估距离)
 _EVAL_RANGE = np.arange(_EVAL_START, _EVAL_LENGHT, _EVAL_STEP)
 
-_A_LAT_REG_MAX = 2.  # Maximum lateral acceleration
+_A_LAT_REG_MAX = 1.8  # Maximum lateral acceleration (降低最大横向加速度限制，提高安全性)
 
 _NO_OVERSHOOT_TIME_HORIZON = 4.  # s. Time to use for velocity desired based on a_target when not overshooting.
 
 # Lookup table for the minimum smooth deceleration during the ENTERING state
 # depending on the actual maximum absolute lateral acceleration predicted on the turn ahead.
-_ENTERING_SMOOTH_DECEL_V = [-0.2, -1.]  # min decel value allowed on ENTERING state
-_ENTERING_SMOOTH_DECEL_BP = [1.3, 3.]  # absolute value of lat acc ahead
+_ENTERING_SMOOTH_DECEL_V = [-0.3, -1.5]  # min decel value allowed on ENTERING state (增强减速强度)
+_ENTERING_SMOOTH_DECEL_BP = [1.0, 2.5]  # absolute value of lat acc ahead (调整断点适应新阈值)
 
 # Lookup table for the acceleration for the TURNING state
 # depending on the current lateral acceleration of the vehicle.
-_TURNING_ACC_V = [0.5, 0., -0.4]  # acc value
-_TURNING_ACC_BP = [1.5, 2.3, 3.]  # absolute value of current lat acc
+_TURNING_ACC_V = [0.3, -0.2, -0.6]  # acc value (增强减速，降低加速)
+_TURNING_ACC_BP = [1.0, 1.8, 2.5]  # absolute value of current lat acc (调整断点)
 
 _LEAVING_ACC = 0.5  # Confortble acceleration to regain speed while leaving a turn.
 
-_MIN_LANE_PROB = 0.6  # Minimum lanes probability to allow curvature prediction based on lanes.
+_MIN_LANE_PROB = 0.5  # Minimum lanes probability to allow curvature prediction based on lanes.
 
 _DEBUG = False
 
@@ -257,8 +257,25 @@ class VisionTurnController():
     self._lat_acc_overshoot_ahead = len(lat_acc_overshoot_idxs) > 0
 
     if self._lat_acc_overshoot_ahead:
-      self._v_overshoot = min(math.sqrt(_A_LAT_REG_MAX / max_pred_curvature), self._v_cruise_setpoint)
+      safe_lat_acc_limit = _A_LAT_REG_MAX * 0.85
+      self._v_overshoot = min(math.sqrt(safe_lat_acc_limit / max_pred_curvature), self._v_cruise_setpoint)
       self._v_overshoot_distance = max(lat_acc_overshoot_idxs[0] * _EVAL_STEP + _EVAL_START, _EVAL_STEP)
+      
+      # 更精确的速度分层和更平滑的减速过渡
+      if self._v_cruise_setpoint > 33.3:  # 120km/h (高速公路)
+        speed_reduction_factor = 0.8
+      elif self._v_cruise_setpoint > 25.0:  # 90km/h (城市快速路)
+        speed_reduction_factor = 0.85
+      elif self._v_cruise_setpoint > 20.8:  # 75km/h (城市主干道)
+        speed_reduction_factor = 0.88
+      elif self._v_cruise_setpoint > 16.7:  # 60km/h
+        speed_reduction_factor = 0.9
+      elif self._v_cruise_setpoint > 13.9:  # 50km/h
+        speed_reduction_factor = 0.93
+      else:  # 低于50km/h
+        speed_reduction_factor = 0.95
+      
+      self._v_overshoot = min(self._v_overshoot * speed_reduction_factor, self._v_cruise_setpoint)
       _debug(f'TVC: High LatAcc. Dist: {self._v_overshoot_distance:.2f}, v: {self._v_overshoot * CV.MS_TO_KPH:.2f}')
 
   def _state_transition(self):
