@@ -90,7 +90,7 @@ class Dashcamd:
       self.DASHCAM_DURATION = self.config['duration']  # 直接使用配置值
       self.DASHCAM_BIT_RATES = self.quality_settings["bitrate"]
       self.DASHCAM_MAX_SIZE_PER_FILE = self.DASHCAM_BIT_RATES / 8 * self.DASHCAM_DURATION
-      self.DASHCAM_FREESPACE_LIMIT = 20  # 20%空间预留
+      self.DASHCAM_FREESPACE_LIMIT = 10  # 20%空间预留
       kept_hours = max(1, min(72, self.config['kept_hours']))  # 限制在1-72小时之间
       self.DASHCAM_KEPT_MIN_SIZE = self.DASHCAM_MAX_SIZE_PER_FILE * (kept_hours * 60 * 60 / self.DASHCAM_DURATION)
 

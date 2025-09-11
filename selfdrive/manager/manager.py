@@ -99,8 +99,8 @@ def manager_init() -> None:
     ("dp_show_date_time", "1"),    # 是否显示时间: 0-不显示 1-显示
     # 行车记录仪相关参数
     ("dp_dashcam_quality", "1"),  # 视频质量：0=低 1=中 2=高
-    ("dp_dashcam_duration", "180"),    # 单个视频时长（秒）
-    ("dp_dashcam_kept_hours", "15"),   # 视频保留时长（小时）
+    ("dp_dashcam_duration", "120"),    # 单个视频时长（秒）
+    ("dp_dashcam_kept_hours", "30"),   # 视频保留时长（小时）
     ("dp_torqued_override", "0"),
     ("dp_torque_lat_accel_factor", "140"),#1.4
     ("dp_torque_friction", "220"),#0.22
