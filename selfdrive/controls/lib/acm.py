@@ -119,8 +119,6 @@ class ACM:
           a_desired_trajectory[i] = MIN_ACCEL  # 选择微弱减速，而不是滑行
         else:  # 如果系统请求的刹车力度大于或等于允许的最小刹车值 (accel_val <= self.allowed_brake_val)
           a_desired_trajectory[i] = self.allowed_brake_val  # 将刹车力度限制在允许的最大值
-      # elif accel_val > 0 and self.v_ego > (self.v_cruise + SPEED_THRESHOLD_FOR_ACCEL_LIMIT): # 如果系统希望加速，且当前车速已超过巡航速度
-      #   a_desired_trajectory[i] = MIN_ACCEL # 限制为微弱减速，而不是0    
     return a_desired_trajectory
 
   def update_output_a_target(self, output_a_target):
@@ -128,20 +126,17 @@ class ACM:
     抑制不必要的刹车以允许平滑滑行
     返回处理后的加速度目标
     """
-    # 条件1: ACM已激活
+    if self.active and output_a_target < 0: # ACM激活且有前车约束的情况 (self.allowed_brake_val 可能小于 0)
+      # 这种情况下，ACM已经激活，并且可能存在前车，所以需要根据 allowed_brake_val 来限制刹车
+      if output_a_target > self.allowed_brake_val:  # 如果系统请求的刹车力度比允许的最小刹车值更温和
+        return MIN_ACCEL  # 选择微弱减速，而不是滑行
+      else:  # 如果系统请求的刹车力度大于或等于允许的最小刹车值 (output_a_target <= self.allowed_brake_val)
+        return self.allowed_brake_val  # 将刹车力度限制在允许的最大值
     # 条件2: 预判到松油门后会激活ACM，并且当前允许的刹车值为0.0（即目标是纯滑行）
     # 并且系统当前的加速度目标是负值（即想要刹车）
-    if (self.active or (self.will_activate_on_gas_release and self.allowed_brake_val == 0.0)) and output_a_target < 0:
+    if (self.will_activate_on_gas_release and self.allowed_brake_val == 0.0) and output_a_target < 0:
       # 在纯滑行或预判纯滑行的情况下，设置为微弱减速而不是0
-      output_a_target = MIN_ACCEL
-    elif self.active and output_a_target < 0: # ACM激活且有前车约束的情况 (self.allowed_brake_val 可能小于 0)
-        # 这种情况下，ACM已经激活，并且可能存在前车，所以需要根据 allowed_brake_val 来限制刹车
-        if output_a_target > self.allowed_brake_val:  # 如果系统请求的刹车力度比允许的最小刹车值更温和
-            output_a_target = MIN_ACCEL  # 选择微弱减速，而不是滑行
-        else:  # 如果系统请求的刹车力度大于或等于允许的最小刹车值 (output_a_target <= self.allowed_brake_val)
-            output_a_target = self.allowed_brake_val  # 将刹车力度限制在允许的最大值
-    # elif self.active and output_a_target > 0 and self.v_ego > (self.v_cruise + SPEED_THRESHOLD_FOR_ACCEL_LIMIT): # ACM激活，系统请求加速，且当前车速已超过巡航速度
-    #     output_a_target = MIN_ACCEL # 限制为微弱减速，而不是0
+      return MIN_ACCEL
     return output_a_target
 
   def set_enabled(self, enabled):
