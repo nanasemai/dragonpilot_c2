@@ -69,9 +69,6 @@ class CarInterface(CarInterfaceBase):
     # 0x2AA is sent by a similar device which intercepts the radar instead of DSU on NO_DSU_CARs
     if 0x2FF in fingerprint[0] or (0x2AA in fingerprint[0] and candidate in NO_DSU_CAR):
       ret.flags |= ToyotaFlags.SMART_DSU.value
-    # 对于无 DSU 车型，设置雷达 CAN 过滤标志
-    if 0x2AA in fingerprint[0] and candidate in NO_DSU_CAR:
-      ret.flags |= ToyotaFlags.RADAR_CAN_FILTER.value
     # TSS2 车型使用摄像头进行纵向控制
     # In TSS2 cars, the camera does long control
     found_ecus = [fw.ecu for fw in car_fw]
@@ -373,7 +370,7 @@ class CarInterface(CarInterfaceBase):
     # 更新车辆状态
     ret = self.CS.update(self.cp, self.cp_cam)
     # 处理车距按钮事件（仅适用于特定车型）
-    if self.CP.carFingerprint in (TSS2_CAR - RADAR_ACC_CAR) or (self.CP.flags & ToyotaFlags.SMART_DSU and not self.CP.flags & ToyotaFlags.RADAR_CAN_FILTER):
+    if self.CP.carFingerprint in (TSS2_CAR - RADAR_ACC_CAR) or (self.CP.flags & ToyotaFlags.SMART_DSU):
       ret.buttonEvents = create_button_events(self.CS.distance_button, self.CS.prev_distance_button, {1: ButtonType.gapAdjustCruise})
 
     # 创建通用事件
