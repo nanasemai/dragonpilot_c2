@@ -7,6 +7,8 @@
 {% block main %}
     <br>
     <h1>C2日志</h1>
+    <a href="/delete_all_c2_logs" class="btn btn-danger" onclick="return confirm('确定要删除所有C2日志吗？此操作不可恢复！');">删除所有C2日志</a>
+    <a href="/package_c2_logs" class="btn btn-primary ml-2" onclick="return confirm('确定要将所有C2日志打包成压缩包吗？');">打包所有C2日志</a>
     {% if current_path %}
         <h5>当前路径: {{ current_path }}</h5>
     {% endif %}
@@ -45,6 +47,9 @@
                             {% if row.type != 'directory' %}
                             <div class="btn-group" role="group">
                                 <a href="/download/c2_logs/{{ row.path }}" class="btn btn-sm btn-outline-success">下载</a>
+                                <a href="/delete/c2_logs/{{ row.path }}" class="btn btn-sm btn-outline-danger ml-2" onclick="return confirm('确定要删除这个日志文件吗？此操作不可恢复！');">
+                                    删除
+                                </a>
                             </div>
                             {% endif %}
                         </td>

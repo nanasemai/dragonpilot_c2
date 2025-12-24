@@ -171,10 +171,16 @@ class LatControlTorque(LatControl):
         # 只有在启用时才获取和更新这些参数
         self.torque_params.latAccelFactor = float(self.param_s.get("dp_torque_lat_accel_factor", encoding="utf8")) * 0.01 # 1~500 delvalue=250
         self.torque_params.friction = float(self.param_s.get("dp_torque_friction", encoding="utf8")) * 0.001 #1~800 delvalue=220
-        lateralTorqueKp = int(self.param_s.get("dp_lateral_torque_kp", encoding="utf-8")) * 0.01
-        lateralTorqueKi = int(self.param_s.get("dp_lateral_torque_ki", encoding="utf-8")) * 0.01
+        lateralTorqueKp = float(self.param_s.get("dp_lateral_torque_kp", encoding="utf8")) * 0.01
+        lateralTorqueKi = float(self.param_s.get("dp_lateral_torque_ki", encoding="utf8")) * 0.01
         self.pid._k_p = [[0], [lateralTorqueKp]]
         self.pid._k_i = [[0], [lateralTorqueKi]]
+
+  def _get_past_values(self, deque_obj, default_val, offsets):
+    """安全获取历史值"""
+    if len(deque_obj) == 0:
+      return [default_val] * len(offsets)
+    return [deque_obj[min(len(deque_obj)-1, i)] for i in offsets]
 
   def update(self, active, CS, VM, params, last_actuators, steer_limited, desired_curvature, desired_curvature_rate, llk, model_data=None):
     """更新控制器状态和计算控制输出
@@ -265,9 +271,9 @@ class LatControlTorque(LatControl):
         # prepare past and future values
         # adjust future times to account for longitudinal acceleration
         adjusted_future_times = [t + 0.5*CS.aEgo*(t/max(CS.vEgo, 1.0)) for t in self.nn_future_times]
-        past_rolls = [self.roll_deque[min(len(self.roll_deque)-1, i)] for i in self.history_frame_offsets]
+        past_rolls = self._get_past_values(self.roll_deque, roll, self.history_frame_offsets)
         future_rolls = [roll_pitch_adjust(interp(t, ModelConstants.T_IDXS, model_data.orientation.x) + roll, interp(t, ModelConstants.T_IDXS, model_data.orientation.y) + pitch) for t in adjusted_future_times]
-        past_lateral_accels_desired = [self.lateral_accel_desired_deque[min(len(self.lateral_accel_desired_deque)-1, i)] for i in self.history_frame_offsets]
+        past_lateral_accels_desired = self._get_past_values(self.lateral_accel_desired_deque, desired_lateral_accel, self.history_frame_offsets)
         future_planned_lateral_accels = [interp(t, ModelConstants.T_IDXS[:CONTROL_N], model_data.acceleration.y) for t in adjusted_future_times]
 
         # compute NNFF error response
@@ -302,7 +308,7 @@ class LatControlTorque(LatControl):
 
         if self.nn_friction_override:
           pid_log.error += self.torque_from_lateral_accel(LatControlInputs(0.0, 0.0, CS.vEgo, CS.aEgo), self.torque_params,
-                                                          friction_input, lateral_accel_deadzone, friction_compensation=True)
+                                                          friction_input, lateral_accel_deadzone, friction_compensation=True, gravity_adjusted=True)
         #nn_log = nn_input + nnff_setpoint_input + nnff_measurement_input
         # # 记录神经网络输出（当输出较大时）
         # if abs(torque_from_setpoint) > 1.0:
@@ -310,9 +316,9 @@ class LatControlTorque(LatControl):
       else:# 不使用NNFF或者模型不对
         gravity_adjusted_lateral_accel = desired_lateral_accel - roll_compensation
         torque_from_setpoint = self.torque_from_lateral_accel(LatControlInputs(setpoint, roll_compensation, CS.vEgo, CS.aEgo), self.torque_params,
-                                                              lateral_jerk_setpoint, lateral_accel_deadzone, friction_compensation=self.use_nnff_lite)
+                                                              lateral_jerk_setpoint, lateral_accel_deadzone, friction_compensation=self.use_nnff_lite, gravity_adjusted=True)
         torque_from_measurement = self.torque_from_lateral_accel(LatControlInputs(measurement, roll_compensation, CS.vEgo, CS.aEgo), self.torque_params,
-                                                                 lateral_jerk_measurement, lateral_accel_deadzone, friction_compensation=self.use_nnff_lite)
+                                                                 lateral_jerk_measurement, lateral_accel_deadzone, friction_compensation=self.use_nnff_lite, gravity_adjusted=True)
         pid_log.error = torque_from_setpoint - torque_from_measurement
         error = desired_lateral_accel - actual_lateral_accel
         if self.use_nnff_lite:
@@ -321,7 +327,7 @@ class LatControlTorque(LatControl):
           friction_input = error
         # 使用传统方法计算前馈控制量
         ff = self.torque_from_lateral_accel(LatControlInputs(gravity_adjusted_lateral_accel, roll_compensation, CS.vEgo, CS.aEgo), self.torque_params,
-                                            friction_input, lateral_accel_deadzone, friction_compensation=True)
+                                            friction_input, lateral_accel_deadzone, friction_compensation=True, gravity_adjusted=True)
 
       # 更新PID控制器
       freeze_integrator = steer_limited or CS.steeringPressed or CS.vEgo < 5

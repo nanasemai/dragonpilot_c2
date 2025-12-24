@@ -1,4 +1,3 @@
-import copy
 import numpy as np
 from cereal import car
 from openpilot.common.conversions import Conversions as CV
@@ -90,6 +89,8 @@ class CarState(CarStateBase):
     self._BSM_TIMEOUT = 0.5  # BSM超时时间(秒)
     self._last_bsm_update = 0.  # 最后BSM更新时间
 
+    # 帧计数器
+    self.frame = 0  # 初始化帧计数器
 
   def update(self, cp, cp_cam):
     """更新车辆状态
@@ -143,7 +144,8 @@ class CarState(CarStateBase):
     torque_sensor_angle_deg = cp.vl["STEER_TORQUE_SENSOR"]["STEER_ANGLE"]  # 扭矩传感器角度
 
     # 转向角度初始化和偏移处理
-    if abs(torque_sensor_angle_deg) > 1e-3 and not bool(cp.vl["STEER_TORQUE_SENSOR"]["STEER_ANGLE_INITIALIZING"]):
+    # 只要传感器不再初始化，就认为角度已准确（移除角度非零检查，避免方向盘精准停在0度时的误判）
+    if not bool(cp.vl["STEER_TORQUE_SENSOR"]["STEER_ANGLE_INITIALIZING"]):
       self.accurate_steer_angle_seen = True
 
     if self.accurate_steer_angle_seen:
@@ -160,11 +162,13 @@ class CarState(CarStateBase):
       self._dp_toyota_zss = False
     if self._dp_toyota_zss:
       try:
-        zorro_steer = cp.vl["SECONDARY_STEER_ANGLE"]["ZORRO_STEER"]
+        # 使用get方法防止KeyError，如果消息或信号不存在则返回默认值0
+        zorro_steer = cp.vl.get("SECONDARY_STEER_ANGLE", {}).get("ZORRO_STEER", 0)
+        # 合理性检查：注意500度阈值可能需要根据目标车型的转向极限进行调整
+        # 某些丰田车型在掉头时转向角可能超过500度
         if abs(zorro_steer) > 500:  # 添加合理性检查
           self._dp_zss_threshold_count = ZSS_THRESHOLD_COUNT + 1
         else:
-          zorro_steer = cp.vl["SECONDARY_STEER_ANGLE"]["ZORRO_STEER"]
           # rick - when alka is on, we check main_on state
           acc_active = (self._dp_alka and cp.vl["PCM_CRUISE_2"]["MAIN_ON"] != 0) or bool(cp.vl["PCM_CRUISE"]["CRUISE_ACTIVE"])
           # only compute zss offset when acc is active
@@ -185,7 +189,7 @@ class CarState(CarStateBase):
             self._dp_zss_threshold_count += 1
           else:
             ret.steeringAngleDeg = new_steering_angle_deg
-      except Exception as e:
+      except Exception:
         self._dp_toyota_zss = False
         cloudlog.exception("ZSS error")
 
@@ -206,13 +210,31 @@ class CarState(CarStateBase):
     ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD  # 判断是否有方向盘转向操作
 
     # 检查EPS LKA/LTA故障状态
-    ret.steerFaultTemporary = cp.vl["EPS_STATUS"]["LKA_STATE"] in TEMP_STEER_FAULTS  # 临时转向故障
-    ret.steerFaultPermanent = cp.vl["EPS_STATUS"]["LKA_STATE"] in PERM_STEER_FAULTS  # 永久转向故障
+    lka_state = cp.vl["EPS_STATUS"]["LKA_STATE"]
+    ret.steerFaultTemporary = lka_state in TEMP_STEER_FAULTS
+    ret.steerFaultPermanent = lka_state in PERM_STEER_FAULTS
+
+    if lka_state != getattr(self, '_prev_lka_state', -1):
+        if ret.steerFaultPermanent:
+            cloudlog.error(f"Toyota EPS LKA Fault: State changed to {lka_state} (Permanent)")
+        elif ret.steerFaultTemporary:
+            cloudlog.warning(f"Toyota EPS LKA Fault: State changed to {lka_state} (Temporary)")
+        self._prev_lka_state = lka_state
 
     # 如果是角度控制类型，还需要检查LTA状态
     if self.CP.steerControlType == SteerControlType.angle:
-      ret.steerFaultTemporary = ret.steerFaultTemporary or cp.vl["EPS_STATUS"]["LTA_STATE"] in TEMP_STEER_FAULTS  # 增加LTA临时故障检查
-      ret.steerFaultPermanent = ret.steerFaultPermanent or cp.vl["EPS_STATUS"]["LTA_STATE"] in PERM_STEER_FAULTS  # 增加LTA永久故障检查
+      lta_state = cp.vl["EPS_STATUS"]["LTA_STATE"]
+      lta_fault_temp = lta_state in TEMP_STEER_FAULTS
+      lta_fault_perm = lta_state in PERM_STEER_FAULTS
+      ret.steerFaultTemporary = ret.steerFaultTemporary or lta_fault_temp
+      ret.steerFaultPermanent = ret.steerFaultPermanent or lta_fault_perm
+
+      if lta_state != getattr(self, '_prev_lta_state', -1):
+          if lta_fault_perm:
+              cloudlog.error(f"Toyota EPS LTA Fault: State changed to {lta_state} (Permanent)")
+          elif lta_fault_temp:
+              cloudlog.warning(f"Toyota EPS LTA Fault: State changed to {lta_state} (Temporary)")
+          self._prev_lta_state = lta_state
 
     # 处理不同车型的巡航控制状态
     if self.CP.carFingerprint in UNSUPPORTED_DSU_CAR:  # 不支持DSU的车型
@@ -276,7 +298,7 @@ class CarState(CarStateBase):
 
     # LKAS HUD（抬头显示）更新
     if self.CP.carFingerprint != CAR.PRIUS_V:
-      self.lkas_hud = copy.copy(cp_cam.vl["LKAS_HUD"])  # 车道保持辅助系统显示信息
+      self.lkas_hud = cp_cam.vl["LKAS_HUD"]  # 车道保持辅助系统显示信息 - 直接赋值优化内存使用，避免copy.copy的微小开销
 
     # dp 车距按钮处理
     if self.CP.carFingerprint not in UNSUPPORTED_DSU_CAR:
@@ -295,9 +317,10 @@ class CarState(CarStateBase):
     # 启用盲点调试模式（由@arne182开发）
     # 保留注释掉的代码以便将来调试
     if self.dp_toyota_enhanced_bsm and self.frame > 199:  # 增强型BSM功能
-      distance_1 = cp.vl["DEBUG"].get('BLINDSPOTD1')  # 盲点距离1
-      distance_2 = cp.vl["DEBUG"].get('BLINDSPOTD2')  # 盲点距离2
-      side = cp.vl["DEBUG"].get('BLINDSPOTSIDE')  # 盲点侧边指示
+      debug_vl = cp.vl.get("DEBUG", {})  # 安全获取DEBUG消息，默认空字典
+      distance_1 = debug_vl.get('BLINDSPOTD1')  # 盲点距离1
+      distance_2 = debug_vl.get('BLINDSPOTD2')  # 盲点距离2
+      side = debug_vl.get('BLINDSPOTSIDE')  # 盲点侧边指示
 
       # 确保所有盲点监测相关数据都有效
       if distance_1 is not None and distance_2 is not None and side is not None:
@@ -327,28 +350,29 @@ class CarState(CarStateBase):
           if self._right_blindspot_d1 > 10 or self._right_blindspot_d2 > 10:
             self._right_blindspot = True
 
-        # 左侧盲点计数器处理
-        if self._left_blindspot_counter > 0:
-          self._left_blindspot_counter -= 1  # 计数器递减
-        else:
-          # 计数器归零时清除左侧盲点状态
-          self._left_blindspot = False
-          self._left_blindspot_d1 = 0
-          self._left_blindspot_d2 = 0
+      # 左侧盲点计数器处理（移到条件外，确保无论是否收到新消息都能递减）
+      if self._left_blindspot_counter > 0:
+        self._left_blindspot_counter -= 1  # 计数器递减
+      else:
+        # 计数器归零时清除左侧盲点状态
+        self._left_blindspot = False
+        self._left_blindspot_d1 = 0
+        self._left_blindspot_d2 = 0
 
-        # 右侧盲点计数器处理
-        if self._right_blindspot_counter > 0:
-          self._right_blindspot_counter -= 1  # 计数器递减
-        else:
-          # 计数器归零时清除右侧盲点状态
-          self._right_blindspot = False
-          self._right_blindspot_d1 = 0
-          self._right_blindspot_d2 = 0
+      # 右侧盲点计数器处理（移到条件外，确保无论是否收到新消息都能递减）
+      if self._right_blindspot_counter > 0:
+        self._right_blindspot_counter -= 1  # 计数器递减
+      else:
+        # 计数器归零时清除右侧盲点状态
+        self._right_blindspot = False
+        self._right_blindspot_d1 = 0
+        self._right_blindspot_d2 = 0
 
-        # 更新返回值中的盲点状态
-        ret.leftBlindspot = self._left_blindspot
-        ret.rightBlindspot = self._right_blindspot
+      # 更新返回值中的盲点状态
+      ret.leftBlindspot = self._left_blindspot
+      ret.rightBlindspot = self._right_blindspot
 
+    self.frame += 1
     return ret
 
   @staticmethod

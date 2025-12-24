@@ -7,6 +7,7 @@
 {% block main %}
     <br>
     <h1>屏幕录像</h1>
+    <a href="/delete_all_screenrecords" class="btn btn-danger" onclick="return confirm('确定要删除所有屏幕录像吗？此操作不可恢复！');">删除所有屏幕录像</a>
     <br>
     <div class="container">
         <video id="videoPlayer" width="480" height="360" controls class="mb-3">
@@ -37,6 +38,9 @@
                             <td>
                                 <a href="/screenrecords/download/{{ row.name }}" class="btn btn-sm btn-outline-primary">
                                     下载
+                                </a>
+                                <a href="/screenrecords/delete/{{ row.name }}" class="btn btn-sm btn-outline-danger ml-2" onclick="return confirm('确定要删除这个屏幕录像文件吗？')">
+                                    删除
                                 </a>
                             </td>
                         </tr>

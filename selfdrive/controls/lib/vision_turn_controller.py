@@ -10,32 +10,37 @@ import cereal.messaging as messaging
 TRAJECTORY_SIZE = 33
 _MIN_V = 5.6  # Do not operate under 20km/h
 
-# 原始常量保留，但会被参数覆盖 - 优化后的默认值更加灵敏
-_ENTERING_PRED_LAT_ACC_TH = 1.0  # Predicted Lat Acc threshold to trigger entering turn state. (降低阈值提高灵敏度)
-_ABORT_ENTERING_PRED_LAT_ACC_TH = 0.8  # Predicted Lat Acc threshold to abort entering state if speed drops. (降低阈值)
+# 代码级优化 (C2 + Corolla 专属调优) 
+# 修改 1: 触发阈值微调 (避免 C2 噪点导致的幽灵刹车)
+# 0.8 -> 0.9: 过滤直线行驶时的模型抖动
+_ENTERING_PRED_LAT_ACC_TH = 0.9
+_ABORT_ENTERING_PRED_LAT_ACC_TH = 0.7  # 保持 0.2 的迟滞区间
 
-_TURNING_LAT_ACC_TH = 1.0  # Lat Acc threshold to trigger turning turn state. (降低阈值)
-_LEAVING_LAT_ACC_TH = 0.9  # Lat Acc threshold to trigger leaving turn state. (降低阈值)
-_FINISH_LAT_ACC_TH = 0.8  # Lat Acc threshold to trigger end of turn cycle. (降低阈值)
+_TURNING_LAT_ACC_TH = 0.75
+_LEAVING_LAT_ACC_TH = 0.8
+_FINISH_LAT_ACC_TH = 0.7
 
-_EVAL_STEP = 4.  # mts. Resolution of the curvature evaluation. (提高分辨率)
-_EVAL_START = 15.  # mts. Distance ahead where to start evaluating vision curvature. (提前开始评估)
-_EVAL_LENGHT = 180.  # mts. Distance ahead where to stop evaluating vision curvature. (延长评估距离)
+_EVAL_STEP = 3.
+# 修改 2: 预测范围 (C2 最佳可视范围)
+_EVAL_START = 10.
+_EVAL_LENGHT = 120. # C2 100米外数据不仅不准而且跳变大
 _EVAL_RANGE = np.arange(_EVAL_START, _EVAL_LENGHT, _EVAL_STEP)
 
-_A_LAT_REG_MAX = 1.8  # Maximum lateral acceleration (降低最大横向加速度限制，提高安全性)
+# 修改 3: 最大横向加速度限制
+# 1.5 -> 1.8: 1.5 在高速缓弯会减速太严重(阻碍车流)，1.8 更符合正常驾驶体感
+_A_LAT_REG_MAX = 1.8
 
-_NO_OVERSHOOT_TIME_HORIZON = 4.  # s. Time to use for velocity desired based on a_target when not overshooting.
+_NO_OVERSHOOT_TIME_HORIZON = 3.
 
+# 修改 4: 减速力度 (针对 Corolla 刹车线性度优化)
+# 保持激进但稍微平滑起步，避免“点头”
 # Lookup table for the minimum smooth deceleration during the ENTERING state
-# depending on the actual maximum absolute lateral acceleration predicted on the turn ahead.
-_ENTERING_SMOOTH_DECEL_V = [-0.3, -1.5]  # min decel value allowed on ENTERING state (增强减速强度)
-_ENTERING_SMOOTH_DECEL_BP = [1.0, 2.5]  # absolute value of lat acc ahead (调整断点适应新阈值)
+_ENTERING_SMOOTH_DECEL_V = [-0.6, -2.0]  # 起始减速稍微加强，确保响应
+_ENTERING_SMOOTH_DECEL_BP = [0.9, 2.0]   # 对应新的阈值
 
 # Lookup table for the acceleration for the TURNING state
-# depending on the current lateral acceleration of the vehicle.
-_TURNING_ACC_V = [0.3, -0.2, -0.6]  # acc value (增强减速，降低加速)
-_TURNING_ACC_BP = [1.0, 1.8, 2.5]  # absolute value of current lat acc (调整断点)
+_TURNING_ACC_V = [0.0, -0.5, -1.0]
+_TURNING_ACC_BP = [0.9, 1.5, 2.0]
 
 _LEAVING_ACC = 0.5  # Confortble acceleration to regain speed while leaving a turn.
 
@@ -106,10 +111,19 @@ class VisionTurnController():
     self._state = VisionTurnControllerState.disabled
     self._sm = messaging.SubMaster(['lateralPlanExt'])
     
+    # 参数读取频率控制计数器
+    self._params_counter = 0
+    self._PARAMS_UPDATE_INTERVAL = 50  # 50帧更新一次（假设100Hz循环，即0.5秒更新一次）
+    
     # 初始化自定义参数
     self.turn_sensitivity = 1.0  # 弯道检测灵敏度系数
     self.decel_ratio = 1.0  # 减速强度系数
     self.turn_speed_ratio = 1.0  # 弯道速度系数
+    
+    # 平滑处理相关变量
+    self._a_target_last = 0.0  # 上一次的目标加速度
+    self._v_turn_last = 0.0  # 上一次的目标速度
+    self._SMOOTH_ALPHA = 0.2  # 平滑系数
     
     # 应用参数调整后的实际值
     self.entering_lat_acc_th = _ENTERING_PRED_LAT_ACC_TH
@@ -179,8 +193,14 @@ class VisionTurnController():
   def v_turn(self):
     if not self.is_active:
       return self._v_cruise_setpoint
-    return self._v_overshoot if self._lat_acc_overshoot_ahead \
+    
+    # 计算原始目标速度
+    raw_v_turn = self._v_overshoot if self._lat_acc_overshoot_ahead \
       else self._v_ego + self._a_target * _NO_OVERSHOOT_TIME_HORIZON
+    
+    # 应用平滑处理
+    self._v_turn_last = self._SMOOTH_ALPHA * raw_v_turn + (1 - self._SMOOTH_ALPHA) * self._v_turn_last
+    return self._v_turn_last
 
   @property
   def is_active(self):
@@ -196,47 +216,47 @@ class VisionTurnController():
   def _update_calculations(self, sm):
     # Get path polynomial aproximation for curvature estimation from model data.
     path_poly = None
-    model_data = sm['modelV2']
 
-    # 1. When the probability of lanes is good enough, compute polynomial from lanes as they are way more stable
-    # on current mode than drving path.
-    if model_data is not None and len(model_data.laneLines) == 4 and len(model_data.laneLines[0].t) == TRAJECTORY_SIZE:
-      ll_x = model_data.laneLines[1].x  # left and right ll x is the same
-      lll_y = np.array(model_data.laneLines[1].y)
-      rll_y = np.array(model_data.laneLines[2].y)
-      l_prob = model_data.laneLineProbs[1]
-      r_prob = model_data.laneLineProbs[2]
-      lll_std = model_data.laneLineStds[1]
-      rll_std = model_data.laneLineStds[2]
-
-      # Reduce reliance on lanelines that are too far apart or will be in a few seconds
-      width_pts = rll_y - lll_y
-      prob_mods = []
-      for t_check in [0.0, 1.5, 3.0]:
-        width_at_t = interp(t_check * (self._v_ego + 7), ll_x, width_pts)
-        prob_mods.append(interp(width_at_t, [4.0, 5.0], [1.0, 0.0]))
-      mod = min(prob_mods)
-      l_prob *= mod
-      r_prob *= mod
-
-      # Reduce reliance on uncertain lanelines
-      l_std_mod = interp(lll_std, [.15, .3], [1.0, 0.0])
-      r_std_mod = interp(rll_std, [.15, .3], [1.0, 0.0])
-      l_prob *= l_std_mod
-      r_prob *= r_std_mod
-
-      # Find path from lanes as the average center lane only if min probability on both lanes is above threshold.
-      if l_prob > _MIN_LANE_PROB and r_prob > _MIN_LANE_PROB:
-        c_y = width_pts / 2 + lll_y
-        path_poly = np.polyfit(ll_x, c_y, 3)
-
-    # 2. If not polynomial derived from lanes, then derive it from compensated driving path with lanes as
-    # provided by `lateralPlanner`.
+    # 1. First priority: Use Path (lateralPlanExt)
+    # This is more stable on curves for C2 hardware
     lat_planner_data = self._sm['lateralPlanExt']
     self._sm.update(0)
-    if path_poly is None and lat_planner_data is not None and len(lat_planner_data.dPathWLinesX) > 0 \
+    if lat_planner_data is not None and len(lat_planner_data.dPathWLinesX) >= 4 \
         and lat_planner_data.dPathWLinesX[0] > 0:
       path_poly = np.polyfit(lat_planner_data.dPathWLinesX, lat_planner_data.dPathWLinesY, 3)
+
+    # 2. Second priority: Use LaneLines as backup
+    if path_poly is None:
+      model_data = sm['modelV2']
+      if model_data is not None and len(model_data.laneLines) == 4 and len(model_data.laneLines[0].t) == TRAJECTORY_SIZE:
+        ll_x = model_data.laneLines[1].x  # left and right ll x is the same
+        lll_y = np.array(model_data.laneLines[1].y)
+        rll_y = np.array(model_data.laneLines[2].y)
+        l_prob = model_data.laneLineProbs[1]
+        r_prob = model_data.laneLineProbs[2]
+        lll_std = model_data.laneLineStds[1]
+        rll_std = model_data.laneLineStds[2]
+
+        # Reduce reliance on lanelines that are too far apart or will be in a few seconds
+        width_pts = rll_y - lll_y
+        prob_mods = []
+        for t_check in [0.0, 1.5, 3.0]:
+          width_at_t = interp(t_check * (self._v_ego + 7), ll_x, width_pts)
+          prob_mods.append(interp(width_at_t, [4.0, 5.0], [1.0, 0.0]))
+        mod = min(prob_mods)
+        l_prob *= mod
+        r_prob *= mod
+
+        # Reduce reliance on uncertain lanelines
+        l_std_mod = interp(lll_std, [.15, .3], [1.0, 0.0])
+        r_std_mod = interp(rll_std, [.15, .3], [1.0, 0.0])
+        l_prob *= l_std_mod
+        r_prob *= r_std_mod
+
+        # Find path from lanes as the average center lane only if min probability on both lanes is above threshold.
+        if l_prob > _MIN_LANE_PROB and r_prob > _MIN_LANE_PROB:
+          c_y = width_pts / 2 + lll_y
+          path_poly = np.polyfit(ll_x, c_y, 3)
 
     # 3. If no polynomial derived from lanes or driving path, then provide a straight line poly.
     if path_poly is None:
@@ -269,7 +289,7 @@ class VisionTurnController():
       elif self._v_cruise_setpoint > 20.8:  # 75km/h (城市主干道)
         speed_reduction_factor = 0.88
       elif self._v_cruise_setpoint > 16.7:  # 60km/h
-        speed_reduction_factor = 0.9
+        speed_reduction_factor = 0.92
       elif self._v_cruise_setpoint > 13.9:  # 50km/h
         speed_reduction_factor = 0.93
       else:  # 低于50km/h
@@ -336,8 +356,9 @@ class VisionTurnController():
     elif self.state == VisionTurnControllerState.leaving:
       a_target = _LEAVING_ACC
 
-    # update solution values.
-    self._a_target = a_target
+    # update solution values with smoothing
+    self._a_target = self._SMOOTH_ALPHA * a_target + (1 - self._SMOOTH_ALPHA) * self._a_target_last
+    self._a_target_last = self._a_target
 
   def update(self, enabled, v_ego, a_ego, v_cruise_setpoint, sm):
     self._op_enabled = enabled
@@ -346,8 +367,11 @@ class VisionTurnController():
     self._a_ego = a_ego
     self._v_cruise_setpoint = v_cruise_setpoint
 
-    # 定期更新参数
-    self._update_params()
+    # 定期更新参数 - 使用计数器控制频率
+    self._params_counter += 1
+    if self._params_counter >= self._PARAMS_UPDATE_INTERVAL:
+      self._update_params()
+      self._params_counter = 0
     self._update_calculations(sm)
     self._state_transition()
     self._update_solution()

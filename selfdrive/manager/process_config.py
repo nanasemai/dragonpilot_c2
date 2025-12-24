@@ -1,4 +1,5 @@
 import os
+import operator
 
 from cereal import car
 from openpilot.common.params import Params
@@ -43,6 +44,22 @@ def only_onroad(started: bool, params, CP: car.CarParams) -> bool:
 def only_offroad(started, params, CP: car.CarParams) -> bool:
   return not started
 
+def offroad_or_device_off_road(started, params, CP: car.CarParams) -> bool:
+  # Check if vehicle is in offroad state or device is in offline mode
+  return not started or params.get_bool("dp_device_go_off_road", False)
+  
+
+def panda_mon_onroad(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return started and params.get_bool("dp_panda_monitoring")
+
+def control_mon_onroad(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return started and params.get_bool("dp_control_monitoring")
+
+def or_(*fns):
+  return lambda *args: operator.or_(*(fn(*args) for fn in fns))
+
+def and_(*fns):
+  return lambda *args: operator.and_(*(fn(*args) for fn in fns))
 procs = [
   NativeProcess("camerad", "selfdrive/camerad", ["./camerad"], driverview),
   NativeProcess("clocksd", "system/clocksd", ["./clocksd"], only_onroad),
@@ -80,7 +97,7 @@ procs = [
   PythonProcess("radard", "selfdrive.controls.radard", only_onroad),
   PythonProcess("thermald", "selfdrive.thermald.thermald", always_run),
   PythonProcess("tombstoned", "selfdrive.tombstoned", always_run, enabled=not PC),
-  PythonProcess("updated", "selfdrive.updated", only_offroad, enabled=not PC),
+  PythonProcess("updated", "selfdrive.updated", offroad_or_device_off_road, enabled=not PC),
   PythonProcess("uploader", "selfdrive.loggerd.uploader", only_offroad),
   # PythonProcess("statsd", "selfdrive.statsd", offroad=True),
   # debug procs
@@ -100,6 +117,10 @@ procs = [
   PythonProcess("gpxd", "selfdrive.dragonpilot.gpxd",only_onroad),
   # PythonProcess("gpx_uploader", "selfdrive.dragonpilot.gpx_uploader", offroad=True),
   NativeProcess("otisserv", "selfdrive/dragonpilot", ['./otisserv'], only_offroad),
+  # Panda性能监控
+  PythonProcess("panda_monitoring", "selfdrive.monitoring.panda_logger", panda_mon_onroad),
+  # 控制性能监控
+  PythonProcess("control_monitoring", "selfdrive.monitoring.control_logger", control_mon_onroad),
 ]
 
 managed_processes = {p.name: p for p in procs}

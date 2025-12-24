@@ -2,6 +2,8 @@ from cereal import car
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.numpy_fast import interp
 from openpilot.common.realtime import DT_CTRL
+
+from openpilot.common.swaglog import cloudlog
 from opendbc.can.packer import CANPacker
 from openpilot.selfdrive.car import apply_driver_steer_torque_limits
 from openpilot.selfdrive.car.gm import gmcan
@@ -27,7 +29,9 @@ class CarController:
     self.frame = 0
     self.last_steer_frame = 0
     self.last_button_frame = 0
+    self.last_button_frame = 0
     self.cancel_counter = 0
+    self.steer_saturation_counter = 0  # 饱和计数器
 
     self.lka_steering_cmd_counter = 0
     self.lka_icon_status_last = (False, False)
@@ -59,6 +63,13 @@ class CarController:
       #   openpilot can subtly drift, so this is activated throughout a drive to stay synced
       out_of_sync = self.lka_steering_cmd_counter % 4 != (CS.cam_lka_steering_cmd_counter + 1) % 4
       if CS.loopback_lka_steering_cmd_ts_nanos == 0 or out_of_sync:
+        if out_of_sync and CS.loopback_lka_steering_cmd_ts_nanos != 0:
+             # 仅当不是初始化阶段(ts!=0)且发生不同步时记录
+             if not getattr(self, '_sync_issue_logged', False):
+                 cloudlog.warning(f"GM LKAS: Sync Issue Detected - OP Counter: {self.lka_steering_cmd_counter % 4}, Cam Counter: {CS.cam_lka_steering_cmd_counter}")
+                 self._sync_issue_logged = True
+        elif not out_of_sync:
+             self._sync_issue_logged = False
         steer_step = self.params.STEER_STEP
 
     self.lka_steering_cmd_counter += 1 if CS.loopback_lka_steering_cmd_updated else 0
@@ -74,6 +85,26 @@ class CarController:
       if CC.latActive:
         new_steer = int(round(actuators.steer * self.params.STEER_MAX))
         apply_steer = apply_driver_steer_torque_limits(new_steer, self.apply_steer_last, CS.out.steeringTorque, self.params)
+
+        # 饱和监控 (Saturation Monitor)
+        if abs(apply_steer) >= self.params.STEER_MAX:
+             self.steer_saturation_counter += 1
+             if self.steer_saturation_counter > 50 and self.steer_saturation_counter % 50 == 0:
+                 cloudlog.warning(f"GM LKAS: Saturation Detected - Max Torque for {self.steer_saturation_counter} frames")
+        else:
+             self.steer_saturation_counter = 0
+
+        # 响应不匹配监控 (Actuation Mismatch)
+        # 场景: OP 正在用力转，但 EPS 却没怎么动
+        if abs(CC.actuators.steer) > 0.2 and abs(CS.out.steeringTorqueEps) < 15:
+            if not hasattr(self, '_mismatch_counter'):
+                self._mismatch_counter = 0
+            self._mismatch_counter += 1
+            if self._mismatch_counter > 100:
+                if self._mismatch_counter % 100 == 1:
+                     cloudlog.warning(f"GM LKAS: Actuation Mismatch! Req: {CC.actuators.steer:.2f}, Actual EPS: {CS.out.steeringTorqueEps}")
+        else:
+            self._mismatch_counter = 0
       else:
         apply_steer = 0
 

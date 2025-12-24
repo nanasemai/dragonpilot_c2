@@ -4,7 +4,6 @@ import filecmp
 import tempfile
 from opendbc.generator.generator import create_all, opendbc_root
 
-
 def test_generator():
   with tempfile.TemporaryDirectory() as d:
     create_all(d)
@@ -16,7 +15,6 @@ def test_generator():
     err += f"Different files: {comp.diff_files}\n\n"
     err += "Run opendbc/generator/generator.py to regenerate DBC files."
     assert len(comp.diff_files) == 0, err
-
 
 if __name__ == "__main__":
   test_generator()

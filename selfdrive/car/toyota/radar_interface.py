@@ -113,16 +113,16 @@ class RadarInterface(RadarInterfaceBase):
     for ii in sorted(updated_messages):
       if ii in self.RADAR_A_MSGS:
         cpt = self.rcp.vl[ii]
-        # 数据有效性检查：距离、横向位置和相对速度
-        if not (0 <= cpt['LONG_DIST'] < 255 and -50 <= cpt['LAT_DIST'] <= 50 and abs(cpt['REL_SPEED']) < 100):
-          continue
-        # 优化计数器更新逻辑
+        # 先处理计数器状态更新
         if cpt['NEW_TRACK'] or cpt['LONG_DIST'] >= 255:
           self.valid_cnt[ii] = 0
         elif cpt['VALID']:
           self.valid_cnt[ii] = min(self.valid_cnt[ii] + 1, 10)
         else:
           self.valid_cnt[ii] = max(self.valid_cnt[ii] - 1, 0)
+        # 数据有效性检查：距离、横向位置和相对速度
+        if not (0 <= cpt['LONG_DIST'] < 255 and -50 <= cpt['LAT_DIST'] <= 50 and abs(cpt['REL_SPEED']) < 100):
+          continue
         score = self.rcp.vl[ii+16]['SCORE']
         # 判断雷达点是否有效：测量有效或评分大于50且距离有效且计数器大于0
         if cpt['VALID'] or (score > 50 and cpt['LONG_DIST'] < 255 and self.valid_cnt[ii] > 0):

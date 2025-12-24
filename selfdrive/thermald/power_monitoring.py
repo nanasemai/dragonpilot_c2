@@ -202,12 +202,19 @@ class PowerMonitoring:
     disable_charging |= self.params.get_bool("ForcePowerDown")
     return disable_charging
 
+  def _get_field_value(self, obj, field, default=None):
+    """安全获取对象字段值"""
+    if obj is None:
+      return default
+    return getattr(obj, field, default)
+
   def legacy_should_shutdown(self, peripheralState, ignition, in_car, offroad_timestamp, started_seen):
     if offroad_timestamp is None:
       return False
 
     now = time.monotonic()
-    panda_charging = (peripheralState.usbPowerMode != log.PeripheralState.UsbPowerMode.client)
+    usb_power_mode = self._get_field_value(peripheralState, 'usbPowerMode', None)
+    panda_charging = (usb_power_mode != log.PeripheralState.UsbPowerMode.client)
     # BATT_PERC_OFF = 3 if self.is_oneplus else 10
 
     if started_seen and self.dp_device_auto_shutdown and (now - offroad_timestamp) > self.dp_device_auto_shutdown_in:
@@ -215,9 +222,11 @@ class PowerMonitoring:
       if not panda_charging:
         return True
       # rick - if voltage is not updating, assuming the panda is disconnected (e.g. white panda or black w/o comma power)
-      if peripheralState.voltage == self.dp_device_auto_shutdown_voltage_prev:
+      voltage = self._get_field_value(peripheralState, 'voltage', None)
+      if voltage is not None and voltage == self.dp_device_auto_shutdown_voltage_prev:
         return True
-      self.dp_device_auto_shutdown_voltage_prev = peripheralState.voltage
+      if voltage is not None:
+        self.dp_device_auto_shutdown_voltage_prev = voltage
 
     should_shutdown = False
     # Wait until we have shut down charging before powering down

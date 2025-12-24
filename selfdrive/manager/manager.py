@@ -28,6 +28,8 @@ from openpilot.system.version import is_dirty, get_commit, get_version, get_orig
 import json
 from openpilot.selfdrive.car.fingerprints import all_known_cars, all_legacy_fingerprint_cars
 
+from common.realtime import Ratekeeper
+
 
 def manager_init() -> None:
   # update system time from panda
@@ -102,7 +104,7 @@ def manager_init() -> None:
     ("dp_dashcam_duration", "120"),    # 单个视频时长（秒）
     ("dp_dashcam_kept_hours", "30"),   # 视频保留时长（小时）
     ("dp_torqued_override", "0"),
-    ("dp_torque_lat_accel_factor", "140"),#1.4
+    ("dp_torque_lat_accel_factor", "250"),#2.5
     ("dp_torque_friction", "220"),#0.22
     ("dp_gpxd", "0"),
     ("dp_fleet_fileserv", "0"),
@@ -114,8 +116,8 @@ def manager_init() -> None:
     ("dp_lat_lane_change_abort_check", "0"),
     ("dp_lateral_camera_offset", "-6"),#单位厘米
     ("dp_lateral_path_offset", "0"),#单位厘米
-    ("dp_lateral_torque_kp", "100"),  # 1.0
-    ("dp_lateral_torque_ki", "10"),  # 0.1
+    ("dp_lateral_torque_kp", "120"),  # 1.2
+    ("dp_lateral_torque_ki", "15"),  # 0.15
     ("dp_disable_gps", "0"),
     ("dp_lat_use_siglin", "0"),
     ("dp_device_go_off_road", "0"),  # 添加离线模式参数
@@ -130,6 +132,10 @@ def manager_init() -> None:
     ("dp_lead_start_alert", "0"),  # 前车起步提醒功能开关，默认关闭
     ("dp_lead_start_alert_threshold", "3"),  # 前车起步速度阈值(m/s)x0.1 默认0.3 m/s
     ("dp_lead_stop_time_threshold", "30"),  # 前车停止时间阈值(s)x0.1 默认3.0秒
+    # Panda性能监控参数
+    ("dp_panda_monitoring", "0"),  # Panda性能监控功能开关，默认关闭
+    # 控制性能监控参数
+    ("dp_control_monitoring", "0"),  # 控制性能监控功能开关，默认关闭
   ]
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))
@@ -276,6 +282,13 @@ def manager_thread() -> None:
 
   started_prev = False
   last_time_save = 0  # 添加时间保存计数器
+
+  # 初始化打印相关变量
+  last_print_time = 0
+  running = ""
+  PRINT_INTERVAL = 6  # 每6秒打印一次
+  rk = Ratekeeper(10, print_delay_threshold=None)
+
   while True:
     sm.update()
 
@@ -332,17 +345,16 @@ def manager_thread() -> None:
 
     ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore)
 
-    running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
-                       for p in managed_processes.values() if p.proc)
-
-    last_print_time = 0
-    PRINT_INTERVAL = 6  # 每6秒打印一次
-
     # 添加时间间隔检查
     current_time = time.time()
     if current_time - last_print_time >= PRINT_INTERVAL:
+        # 在打印之前总是重新生成运行状态字符串，确保显示最新状态
+        running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)
+                           for p in managed_processes.values() if p.proc)
         print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {running}")
         last_print_time = current_time
+
+    rk.keep_time()
 
     #cloudlog.debug(running)
 

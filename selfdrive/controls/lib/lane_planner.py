@@ -47,9 +47,9 @@ class LanePlanner:
     self.r_lane_change_prob = 0.
 
     # 初始化相机偏移量，使用默认值(C2为0.04米，EON为-0.06米)
-    self.camera_offset = int(Params().get("dp_lateral_camera_offset", encoding="utf-8"))*0.01 #CAMERA_OFFSET
+    self.camera_offset = int(Params().get("dp_lateral_camera_offset", encoding="utf8"))*0.01 #CAMERA_OFFSET
     # 初始化路径偏移量，使用默认值(C2为0.04米，EON为0米)
-    self.path_offset = int(Params().get("dp_lateral_path_offset", encoding="utf-8"))*0.01 #PATH_OFFSET
+    self.path_offset = int(Params().get("dp_lateral_path_offset", encoding="utf8"))*0.01 #PATH_OFFSET
 
   def parse_model(self, md):
     lane_lines = md.laneLines

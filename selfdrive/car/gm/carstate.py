@@ -2,6 +2,8 @@ import copy
 from cereal import car
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.numpy_fast import mean
+
+from openpilot.common.swaglog import cloudlog
 from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from openpilot.selfdrive.car.interfaces import CarStateBase
@@ -88,6 +90,13 @@ class CarState(CarStateBase):
     self.lkas_status = pt_cp.vl["PSCMStatus"]["LKATorqueDeliveredStatus"]
     ret.steerFaultTemporary = self.lkas_status == 2
     ret.steerFaultPermanent = self.lkas_status == 3
+
+    if self.lkas_status != getattr(self, '_prev_lkas_status', -1):
+      if ret.steerFaultPermanent:
+        cloudlog.error(f"GM EPS Fault: State changed to {self.lkas_status} (Permanent - Failed)")
+      elif ret.steerFaultTemporary:
+        cloudlog.warning(f"GM EPS Fault: State changed to {self.lkas_status} (Temporary - Limited)")
+      self._prev_lkas_status = self.lkas_status
 
     # 1 - open, 0 - closed
     ret.doorOpen = (pt_cp.vl["BCMDoorBeltStatus"]["FrontLeftDoor"] == 1 or

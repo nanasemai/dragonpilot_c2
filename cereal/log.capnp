@@ -301,13 +301,13 @@ struct GpsLocationData {
 }
 
 enum Desire {
-  none @0;
-  turnLeft @1;
-  turnRight @2;
-  laneChangeLeft @3;
-  laneChangeRight @4;
-  keepLeft @5;
-  keepRight @6;
+  none @0;#无操作
+  turnLeft @1;#左转
+  turnRight @2;#右转
+  laneChangeLeft @3;#向左变道
+  laneChangeRight @4;#向右变道
+  keepLeft @5;#保持左车道
+  keepRight @6;#保持右车道
 }
 
 enum LaneChangeState {
@@ -594,43 +594,53 @@ struct PeripheralState {
   }
 }
 
-struct RadarState @0x9a185389d6fdd05f {
-  mdMonoTime @6 :UInt64;
-  carStateMonoTime @11 :UInt64;
-  radarErrors @12 :List(Car.RadarData.Error);
+struct RadarState @0x9a185389d6fdd05f {  # 雷达状态数据
+  mdMonoTime @6 :UInt64;  # 毫米波雷达时间戳
+  carStateMonoTime @11 :UInt64;  # 车辆状态时间戳
+  radarErrors @12 :List(Car.RadarData.Error);  # 雷达错误信息列表
 
-  leadOne @3 :LeadData;
-  leadTwo @4 :LeadData;
-  cumLagMs @5 :Float32;
+  leadOne @3 :LeadData;  # 主要目标车辆（最靠近的前方车辆）
+  leadTwo @4 :LeadData;  # 次要目标车辆（第二靠近的前方车辆）
+  cumLagMs @5 :Float32;  # 累积延迟（毫秒）
 
-  struct LeadData {
-    dRel @0 :Float32;
-    yRel @1 :Float32;
-    vRel @2 :Float32;
-    aRel @3 :Float32;
-    vLead @4 :Float32;
-    dPath @6 :Float32;
-    vLat @7 :Float32;
-    vLeadK @8 :Float32;
-    aLeadK @9 :Float32;
-    fcw @10 :Bool;
-    status @11 :Bool;
-    aLeadTau @12 :Float32;
-    modelProb @13 :Float32;
-    radar @14 :Bool;
-    radarTrackId @15 :Int32 = -1;
+  leadLeft @18 :LeadData;  # 左侧目标车辆
+  leadRight @14 :LeadData;  # 右侧目标车辆
+  leadsCenter @15 : List(LeadData);  # 中央车道目标车辆列表
+  leadsLeft @16 : List(LeadData);  # 左侧车道目标车辆列表
+  leadsRight @17 : List(LeadData);  # 右侧车道目标车辆列表
+  leadsLeft2 @19 : List(LeadData);  # 更左侧车道目标车辆列表
+  leadsRight2 @20 : List(LeadData);  # 更右侧车道目标车辆列表
 
-    aLeadDEPRECATED @5 :Float32;
+  struct LeadData {  # 目标车辆数据结构
+    dRel @0 :Float32;  # 相对距离（米）
+    yRel @1 :Float32;  # 横向相对位置（米）
+    vRel @2 :Float32;  # 相对速度（米/秒）
+    aRel @3 :Float32;  # 相对加速度（米/秒²）
+    vLead @4 :Float32;  # 目标车辆绝对速度（米/秒）
+    dPath @6 :Float32;  # 路径距离（米）
+    vLat @7 :Float32;  # 横向速度（米/秒）
+    vLeadK @8 :Float32;  # 目标车辆卡尔曼滤波速度（米/秒）
+    aLeadK @9 :Float32;  # 目标车辆卡尔曼滤波加速度（米/秒²）
+    fcw @10 :Bool;  # 前方碰撞预警标志
+    status @11 :Bool;  # 目标有效状态
+    aLeadTau @12 :Float32;  # 目标车辆加速度时间常数
+    modelProb @13 :Float32;  # 目标模型概率
+    radar @14 :Bool;  # 雷达检测标志
+    radarTrackId @15 :Int32 = -1;  # 雷达跟踪ID
+
+    aLead @5 :Float32;  # 目标车辆加速度（米/秒²）
+    jLead @16 :Float32;  # 目标车辆加加速度（米/秒³）
   }
 
-  # deprecated
-  ftMonoTimeDEPRECATED @7 :UInt64;
-  warpMatrixDEPRECATED @0 :List(Float32);
-  angleOffsetDEPRECATED @1 :Float32;
-  calStatusDEPRECATED @2 :Int8;
-  calCycleDEPRECATED @8 :Int32;
-  calPercDEPRECATED @9 :Int8;
-  canMonoTimesDEPRECATED @10 :List(UInt64);
+  # deprecated 已废弃字段
+  ftMonoTimeDEPRECATED @7 :UInt64;  # 已废弃：特征跟踪时间戳
+  warpMatrixDEPRECATED @0 :List(Float32);  # 已废弃：变换矩阵
+  angleOffsetDEPRECATED @1 :Float32;  # 已废弃：角度偏移
+  calStatusDEPRECATED @2 :Int8;  # 已废弃：校准状态
+  calCycleDEPRECATED @8 :Int32;  # 已废弃：校准周期
+  calPercDEPRECATED @9 :Int8;  # 已废弃：校准百分比
+  canMonoTimesDEPRECATED @10 :List(UInt64);  # 已废弃：CAN消息时间戳列表
+  radarErrorsDEPRECATED @13 :Car.RadarData.Error;  # 已废弃：雷达错误
 }
 
 struct LiveCalibrationData {
@@ -674,188 +684,202 @@ struct LiveTracks {
   oncoming @9 :Bool;
 }
 
+# 控制状态结构体，包含自动驾驶系统的控制状态信息
 struct ControlsState @0x97ff69c53601abf1 {
-  startMonoTime @48 :UInt64;
-  longitudinalPlanMonoTime @28 :UInt64;
-  lateralPlanMonoTime @50 :UInt64;
+  startMonoTime @48 :UInt64;  # 控制开始时间戳
+  longitudinalPlanMonoTime @28 :UInt64;  # 纵向规划时间戳
+  lateralPlanMonoTime @50 :UInt64;  # 横向规划时间戳
 
-  state @31 :OpenpilotState;
-  enabled @19 :Bool;
-  active @36 :Bool;
+  state @31 :OpenpilotState;  # 自动驾驶系统状态
+  enabled @19 :Bool;  # 自动驾驶是否启用
+  active @36 :Bool;  # 自动驾驶是否激活
 
-  experimentalMode @64 :Bool;
-  personality @66 :LongitudinalPersonality;
+  experimentalMode @64 :Bool;  # 是否处于实验模式
+  personality @66 :LongitudinalPersonality;  # 纵向驾驶风格
+  distanceTraveled @67 :Float32;  # 已行驶距离
 
-  longControlState @30 :Car.CarControl.Actuators.LongControlState;
-  vPid @2 :Float32;
-  vTargetLead @3 :Float32;
-  vCruise @22 :Float32;  # actual set speed
-  vCruiseCluster @63 :Float32;  # set speed to display in the UI
-  upAccelCmd @4 :Float32;
-  uiAccelCmd @5 :Float32;
-  ufAccelCmd @33 :Float32;
-  aTarget @35 :Float32;
-  curvature @37 :Float32;  # path curvature from vehicle model
-  desiredCurvature @61 :Float32;  # lag adjusted curvatures used by lateral controllers
-  forceDecel @51 :Bool;
+  longControlState @30 :Car.CarControl.Actuators.LongControlState;  # 纵向控制状态
+  vPid @2 :Float32;  # PID控制目标速度
+  vTargetLead @3 :Float32;  # 前车目标速度
+  vCruise @22 :Float32;  # 实际设置的巡航速度
+  vCruiseCluster @63 :Float32;  # UI显示的巡航速度
+  upAccelCmd @4 :Float32;  # 未处理的加速度命令
+  uiAccelCmd @5 :Float32;  # 用户界面加速度命令
+  ufAccelCmd @33 :Float32;  # 最终滤波后的加速度命令
+  aTarget @35 :Float32;  # 目标加速度
+  curvature @37 :Float32;  # 车辆模型的路径曲率
+  desiredCurvature @61 :Float32;  # 横向控制器使用的滞后调整曲率
+  forceDecel @51 :Bool;  # 是否强制减速
 
-  # UI alerts
-  alertText1 @24 :Text;
-  alertText2 @25 :Text;
-  alertStatus @38 :AlertStatus;
-  alertSize @39 :AlertSize;
-  alertBlinkingRate @42 :Float32;
-  alertType @44 :Text;
-  alertSound @56 :Car.CarControl.HUDControl.AudibleAlert;
-  engageable @41 :Bool;  # can OP be engaged?
+  # UI 警告信息
+  alertText1 @24 :Text;  # 第一行警告文本
+  alertText2 @25 :Text;  # 第二行警告文本
+  alertStatus @38 :AlertStatus;  # 警告状态级别
+  alertSize @39 :AlertSize;  # 警告显示大小
+  alertBlinkingRate @42 :Float32;  # 警告闪烁频率
+  alertType @44 :Text;  # 警告类型
+  alertSound @56 :Car.CarControl.HUDControl.AudibleAlert;  # 警告声音类型
+  engageable @41 :Bool;  # 自动驾驶是否可以启用
 
-  cumLagMs @15 :Float32;
-  canErrorCounter @57 :UInt32;
+  cumLagMs @15 :Float32;  # 累计延迟时间(毫秒)
+  canErrorCounter @57 :UInt32;  # CAN总线错误计数器
 
+  # 横向控制状态联合体，可以是不同类型的横向控制器状态
   lateralControlState :union {
-    indiState @52 :LateralINDIState;
-    pidState @53 :LateralPIDState;
-    angleState @58 :LateralAngleState;
-    debugState @59 :LateralDebugState;
-    torqueState @60 :LateralTorqueState;
+    indiState @52 :LateralINDIState;  # INDI横向控制器状态
+    pidState @53 :LateralPIDState;  # PID横向控制器状态
+    angleState @58 :LateralAngleState;  # 角度横向控制器状态
+    debugState @59 :LateralDebugState;  # 调试用横向控制器状态
+    torqueState @60 :LateralTorqueState;  # 扭矩横向控制器状态
 
-    curvatureStateDEPRECATED @65 :LateralCurvatureState;
+    curvatureStateDEPRECATED @65 :LateralCurvatureState;  # 已废弃的曲率横向控制器状态
     # rick - added back
-    lqrState @55 :LateralLQRState;
+    lqrState @55 :LateralLQRState;  # LQR横向控制器状态
   }
 
+  # 自动驾驶系统状态枚举
   enum OpenpilotState @0xdbe58b96d2d1ac61 {
-    disabled @0;
-    preEnabled @1;
-    enabled @2;
-    softDisabling @3;
-    overriding @4;  # superset of overriding with steering or accelerator
+    disabled @0;  # 禁用状态
+    preEnabled @1;  # 预启用状态
+    enabled @2;  # 启用状态
+    softDisabling @3;  # 软禁用状态
+    overriding @4;  # 人工干预状态（包括转向或加速干预）
   }
 
+  # 警告状态级别枚举
   enum AlertStatus {
-    normal @0;       # low priority alert for user's convenience
-    userPrompt @1;   # mid priority alert that might require user intervention
-    critical @2;     # high priority alert that needs immediate user intervention
+    normal @0;  # 低优先级警告，为用户提供便利
+    userPrompt @1;  # 中等优先级警告，可能需要用户干预
+    critical @2;  # 高优先级警告，需要立即用户干预
   }
 
+  # 警告显示大小枚举
   enum AlertSize {
-    none @0;    # don't display the alert
-    small @1;   # small box
-    mid @2;     # mid screen
-    full @3;    # full screen
+    none @0;  # 不显示警告
+    small @1;  # 小方框
+    mid @2;  # 中等屏幕
+    full @3;  # 全屏
   }
 
+  # INDI横向控制器状态结构体
   struct LateralINDIState {
-    active @0 :Bool;
-    steeringAngleDeg @1 :Float32;
-    steeringRateDeg @2 :Float32;
-    steeringAccelDeg @3 :Float32;
-    rateSetPoint @4 :Float32;
-    accelSetPoint @5 :Float32;
-    accelError @6 :Float32;
-    delayedOutput @7 :Float32;
-    delta @8 :Float32;
-    output @9 :Float32;
-    saturated @10 :Bool;
-    steeringAngleDesiredDeg @11 :Float32;
-    steeringRateDesiredDeg @12 :Float32;
+    active @0 :Bool;  # 是否激活
+    steeringAngleDeg @1 :Float32;  # 转向角度(度)
+    steeringRateDeg @2 :Float32;  # 转向角速度(度)
+    steeringAccelDeg @3 :Float32;  # 转向角加速度(度)
+    rateSetPoint @4 :Float32;  # 角速度设定点
+    accelSetPoint @5 :Float32;  # 角加速度设定点
+    accelError @6 :Float32;  # 角加速度误差
+    delayedOutput @7 :Float32;  # 延迟输出
+    delta @8 :Float32;  # 差值
+    output @9 :Float32;  # 输出值
+    saturated @10 :Bool;  # 是否饱和
+    steeringAngleDesiredDeg @11 :Float32;  # 期望转向角度(度)
+    steeringRateDesiredDeg @12 :Float32;  # 期望转向角速度(度)
   }
 
+  # PID横向控制器状态结构体
   struct LateralPIDState {
-    active @0 :Bool;
-    steeringAngleDeg @1 :Float32;
-    steeringRateDeg @2 :Float32;
-    angleError @3 :Float32;
-    p @4 :Float32;
-    i @5 :Float32;
-    f @6 :Float32;
-    output @7 :Float32;
-    saturated @8 :Bool;
-    steeringAngleDesiredDeg @9 :Float32;
+    active @0 :Bool;  # 是否激活
+    steeringAngleDeg @1 :Float32;  # 转向角度(度)
+    steeringRateDeg @2 :Float32;  # 转向角速度(度)
+    angleError @3 :Float32;  # 角度误差
+    p @4 :Float32;  # 比例项
+    i @5 :Float32;  # 积分项
+    f @6 :Float32;  # 前馈项
+    output @7 :Float32;  # 输出值
+    saturated @8 :Bool;  # 是否饱和
+    steeringAngleDesiredDeg @9 :Float32;  # 期望转向角度(度)
    }
 
+  # 扭矩横向控制器状态结构体
   struct LateralTorqueState {
-    active @0 :Bool;
-    error @1 :Float32;
-    errorRate @8 :Float32;
-    p @2 :Float32;
-    i @3 :Float32;
-    d @4 :Float32;
-    f @5 :Float32;
-    output @6 :Float32;
-    saturated @7 :Bool;
-    actualLateralAccel @9 :Float32;
-    desiredLateralAccel @10 :Float32;
+    active @0 :Bool;  # 是否激活
+    error @1 :Float32;  # 误差
+    errorRate @8 :Float32;  # 误差率
+    p @2 :Float32;  # 比例项
+    i @3 :Float32;  # 积分项
+    d @4 :Float32;  # 微分项
+    f @5 :Float32;  # 前馈项
+    output @6 :Float32;  # 输出值
+    saturated @7 :Bool;  # 是否饱和
+    actualLateralAccel @9 :Float32;  # 实际横向加速度
+    desiredLateralAccel @10 :Float32;  # 期望横向加速度
+    nnLog @11 :List(Float32);  # 神经网络日志
    }
 
+  # LQR横向控制器状态结构体
   struct LateralLQRState {
-    active @0 :Bool;
-    steeringAngleDeg @1 :Float32;
-    i @2 :Float32;
-    output @3 :Float32;
-    lqrOutput @4 :Float32;
-    saturated @5 :Bool;
-    steeringAngleDesiredDeg @6 :Float32;
+    active @0 :Bool;  # 是否激活
+    steeringAngleDeg @1 :Float32;  # 转向角度(度)
+    i @2 :Float32;  # 积分项
+    output @3 :Float32;  # 输出值
+    lqrOutput @4 :Float32;  # LQR输出值
+    saturated @5 :Bool;  # 是否饱和
+    steeringAngleDesiredDeg @6 :Float32;  # 期望转向角度(度)
   }
 
+  # 角度横向控制器状态结构体
   struct LateralAngleState {
-    active @0 :Bool;
-    steeringAngleDeg @1 :Float32;
-    output @2 :Float32;
-    saturated @3 :Bool;
-    steeringAngleDesiredDeg @4 :Float32;
+    active @0 :Bool;  # 是否激活
+    steeringAngleDeg @1 :Float32;  # 转向角度(度)
+    output @2 :Float32;  # 输出值
+    saturated @3 :Bool;  # 是否饱和
+    steeringAngleDesiredDeg @4 :Float32;  # 期望转向角度(度)
   }
 
+  # 曲率横向控制器状态结构体（已废弃）
   struct LateralCurvatureState {
-    active @0 :Bool;
-    actualCurvature @1 :Float32;
-    desiredCurvature @2 :Float32;
-    error @3 :Float32;
-    p @4 :Float32;
-    i @5 :Float32;
-    f @6 :Float32;
-    output @7 :Float32;
-    saturated @8 :Bool;
+    active @0 :Bool;  # 是否激活
+    actualCurvature @1 :Float32;  # 实际曲率
+    desiredCurvature @2 :Float32;  # 期望曲率
+    error @3 :Float32;  # 误差
+    p @4 :Float32;  # 比例项
+    i @5 :Float32;  # 积分项
+    f @6 :Float32;  # 前馈项
+    output @7 :Float32;  # 输出值
+    saturated @8 :Bool;  # 是否饱和
   }
 
+  # 调试用横向控制器状态结构体
   struct LateralDebugState {
-    active @0 :Bool;
-    steeringAngleDeg @1 :Float32;
-    output @2 :Float32;
-    saturated @3 :Bool;
+    active @0 :Bool;  # 是否激活
+    steeringAngleDeg @1 :Float32;  # 转向角度(度)
+    output @2 :Float32;  # 输出值
+    saturated @3 :Bool;  # 是否饱和
   }
 
-  # deprecated
-  vEgoDEPRECATED @0 :Float32;
-  vEgoRawDEPRECATED @32 :Float32;
-  aEgoDEPRECATED @1 :Float32;
-  canMonoTimeDEPRECATED @16 :UInt64;
-  radarStateMonoTimeDEPRECATED @17 :UInt64;
-  mdMonoTimeDEPRECATED @18 :UInt64;
-  yActualDEPRECATED @6 :Float32;
-  yDesDEPRECATED @7 :Float32;
-  upSteerDEPRECATED @8 :Float32;
-  uiSteerDEPRECATED @9 :Float32;
-  ufSteerDEPRECATED @34 :Float32;
-  aTargetMinDEPRECATED @10 :Float32;
-  aTargetMaxDEPRECATED @11 :Float32;
-  rearViewCamDEPRECATED @23 :Bool;
-  driverMonitoringOnDEPRECATED @43 :Bool;
-  hudLeadDEPRECATED @14 :Int32;
-  alertSoundDEPRECATED @45 :Text;
-  angleModelBiasDEPRECATED @27 :Float32;
-  gpsPlannerActiveDEPRECATED @40 :Bool;
-  decelForTurnDEPRECATED @47 :Bool;
-  decelForModelDEPRECATED @54 :Bool;
-  awarenessStatusDEPRECATED @26 :Float32;
-  angleSteersDEPRECATED @13 :Float32;
-  vCurvatureDEPRECATED @46 :Float32;
-  mapValidDEPRECATED @49 :Bool;
-  jerkFactorDEPRECATED @12 :Float32;
-  steerOverrideDEPRECATED @20 :Bool;
-  steeringAngleDesiredDegDEPRECATED @29 :Float32;
-  canMonoTimesDEPRECATED @21 :List(UInt64);
-  desiredCurvatureRateDEPRECATED @62 :Float32;
+  # 已废弃字段
+  vEgoDEPRECATED @0 :Float32;  # 车辆速度（已废弃）
+  vEgoRawDEPRECATED @32 :Float32;  # 原始车辆速度（已废弃）
+  aEgoDEPRECATED @1 :Float32;  # 车辆加速度（已废弃）
+  canMonoTimeDEPRECATED @16 :UInt64;  # CAN总线时间戳（已废弃）
+  radarStateMonoTimeDEPRECATED @17 :UInt64;  # 雷达状态时间戳（已废弃）
+  mdMonoTimeDEPRECATED @18 :UInt64;  # 监控设备时间戳（已废弃）
+  yActualDEPRECATED @6 :Float32;  # 实际横向位置（已废弃）
+  yDesDEPRECATED @7 :Float32;  # 期望横向位置（已废弃）
+  upSteerDEPRECATED @8 :Float32;  # 未处理的转向命令（已废弃）
+  uiSteerDEPRECATED @9 :Float32;  # 用户界面转向命令（已废弃）
+  ufSteerDEPRECATED @34 :Float32;  # 最终滤波后的转向命令（已废弃）
+  aTargetMinDEPRECATED @10 :Float32;  # 最小目标加速度（已废弃）
+  aTargetMaxDEPRECATED @11 :Float32;  # 最大目标加速度（已废弃）
+  rearViewCamDEPRECATED @23 :Bool;  # 后视摄像头（已废弃）
+  driverMonitoringOnDEPRECATED @43 :Bool;  # 驾驶员监控开启（已废弃）
+  hudLeadDEPRECATED @14 :Int32;  # HUD显示前车（已废弃）
+  alertSoundDEPRECATED @45 :Text;  # 警告声音（已废弃）
+  angleModelBiasDEPRECATED @27 :Float32;  # 角度模型偏差（已废弃）
+  gpsPlannerActiveDEPRECATED @40 :Bool;  # GPS规划器激活（已废弃）
+  decelForTurnDEPRECATED @47 :Bool;  # 转弯减速（已废弃）
+  decelForModelDEPRECATED @54 :Bool;  # 模型减速（已废弃）
+  awarenessStatusDEPRECATED @26 :Float32;  # 驾驶员注意力状态（已废弃）
+  angleSteersDEPRECATED @13 :Float32;  # 转向角度（已废弃）
+  vCurvatureDEPRECATED @46 :Float32;  # 速度曲率（已废弃）
+  mapValidDEPRECATED @49 :Bool;  # 地图有效（已废弃）
+  jerkFactorDEPRECATED @12 :Float32;  # 加加速度因子（已废弃）
+  steerOverrideDEPRECATED @20 :Bool;  # 转向干预（已废弃）
+  steeringAngleDesiredDegDEPRECATED @29 :Float32;  # 期望转向角度（已废弃）
+  canMonoTimesDEPRECATED @21 :List(UInt64);  # CAN总线时间戳列表（已废弃）
+  desiredCurvatureRateDEPRECATED @62 :Float32;  # 期望曲率变化率（已废弃）
 }
 
 # All SI units and in device frame
@@ -948,6 +972,13 @@ struct ModelDataV2 {
     hardBrakePredicted @7 :Bool;
     laneChangeState @8 :LaneChangeState;
     laneChangeDirection @9 :LaneChangeDirection;
+    laneWidthLeft @10 :Float32;
+    laneWidthRight @11 :Float32;
+    distanceToRoadEdgeLeft @12 :Float32;
+    distanceToRoadEdgeRight @13 :Float32;
+    desire @14 :Desire;
+    laneChangeProb @15 :Float32;
+    desireLog @16 : Text;
 
 
     # deprecated
@@ -970,6 +1001,8 @@ struct ModelDataV2 {
     brake3MetersPerSecondSquaredProbs @4 :List(Float32);
     brake4MetersPerSecondSquaredProbs @5 :List(Float32);
     brake5MetersPerSecondSquaredProbs @6 :List(Float32);
+    gasPressProbs @7 :List(Float32);
+    brakePressProbs @8 :List(Float32);
   }
 
   struct Pose {
@@ -992,6 +1025,9 @@ struct ModelDataV2 {
 
   struct Action {
     desiredCurvature @0 :Float32;
+    desiredAcceleration @1 :Float32;
+    shouldStop @2 :Bool;
+    desiredVelocity @3 :Float32;
   }
 }
 
@@ -1040,61 +1076,77 @@ struct AndroidLogEntry {
   message @6 :Text;
 }
 
+# 纵向规划结构体，包含自动驾驶系统的纵向控制规划信息
 struct LongitudinalPlan @0xe00b5b3eba12876c {
-  modelMonoTime @9 :UInt64;
-  hasLead @7 :Bool;
-  fcw @8 :Bool;
-  longitudinalPlanSource @15 :LongitudinalPlanSource;
-  processingDelay @29 :Float32;
+  modelMonoTime @9 :UInt64;  # 模型时间戳
+  hasLead @7 :Bool;  # 是否有前车
+  fcw @8 :Bool;  # 前方碰撞警告标志
+  longitudinalPlanSource @15 :LongitudinalPlanSource;  # 纵向规划数据源
+  processingDelay @29 :Float32;  # 处理延迟
 
-  # desired speed/accel/jerk over next 2.5s
-  accels @32 :List(Float32);
-  speeds @33 :List(Float32);
-  jerks @34 :List(Float32);
+  # 未来2.5秒的期望速度/加速度/加加速度
+  accels @32 :List(Float32);  # 加速度序列
+  speeds @33 :List(Float32);  # 速度序列
+  jerks @34 :List(Float32);  # 加加速度序列
+  aTarget @18 :Float32;  # 目标加速度
+  shouldStop @37: Bool;  # 是否应该停止
+  allowThrottle @38: Bool;  # 是否允许加油
+  allowBrake @39: Bool;  # 是否允许刹车
 
-  solverExecutionTime @35 :Float32;
-  personality @36 :LongitudinalPersonality;
+  xState @40: Int32;  # 横向状态
+  trafficState @41: Int32;  # 交通状态
+  events @42:List(Car.CarEvent);  # 车辆事件列表
+  vTargetNow @43: Float32;  # 当前目标速度
+  cruiseTarget @44: Float32;  # 巡航目标值
+  jTargetNow @45: Float32;  # 当前目标加加速度
+  tFollow @46: Float32;  # 跟车时间
+  desiredDistance @47: Float32;  # 期望距离
+  myDrivingMode @48: Int32;  # 驾驶模式
 
+  solverExecutionTime @35 :Float32;  # 求解器执行时间
+  personality @36 :LongitudinalPersonality;  # 纵向驾驶风格
+
+  # 纵向规划数据源枚举
   enum LongitudinalPlanSource {
-    cruise @0;
-    lead0 @1;
-    lead1 @2;
-    lead2 @3;
-    e2e @4;
+    cruise @0;  # 巡航模式
+    lead0 @1;  # 主前车
+    lead1 @2;  # 第二前车
+    lead2 @3;  # 第三前车
+    e2e @4;  # 端到端模式
   }
 
-  # deprecated
-  vCruiseDEPRECATED @16 :Float32;
-  aCruiseDEPRECATED @17 :Float32;
-  vTargetDEPRECATED @3 :Float32;
-  vTargetFutureDEPRECATED @14 :Float32;
-  aTargetDEPRECATED @18 :Float32;
-  vStartDEPRECATED @26 :Float32;
-  aStartDEPRECATED @27 :Float32;
-  vMaxDEPRECATED @20 :Float32;
-  radarStateMonoTimeDEPRECATED @10 :UInt64;
-  jerkFactorDEPRECATED @6 :Float32;
-  hasLeftLaneDEPRECATED @23 :Bool;
-  hasRightLaneDEPRECATED @24 :Bool;
-  aTargetMinDEPRECATED @4 :Float32;
-  aTargetMaxDEPRECATED @5 :Float32;
-  lateralValidDEPRECATED @0 :Bool;
-  longitudinalValidDEPRECATED @2 :Bool;
-  dPolyDEPRECATED @1 :List(Float32);
-  laneWidthDEPRECATED @11 :Float32;
-  vCurvatureDEPRECATED @21 :Float32;
-  decelForTurnDEPRECATED @22 :Bool;
-  mapValidDEPRECATED @25 :Bool;
-  radarValidDEPRECATED @28 :Bool;
-  radarCanErrorDEPRECATED @30 :Bool;
-  commIssueDEPRECATED @31 :Bool;
-  eventsDEPRECATED @13 :List(Car.CarEvent);
-  gpsTrajectoryDEPRECATED @12 :GpsTrajectory;
-  gpsPlannerActiveDEPRECATED @19 :Bool;
+  # 已废弃字段
+  vCruiseDEPRECATED @16 :Float32;  # 巡航速度（已废弃）
+  aCruiseDEPRECATED @17 :Float32;  # 巡航加速度（已废弃）
+  vTargetDEPRECATED @3 :Float32;  # 目标速度（已废弃）
+  vTargetFutureDEPRECATED @14 :Float32;  # 未来目标速度（已废弃）
+  vStartDEPRECATED @26 :Float32;  # 起始速度（已废弃）
+  aStartDEPRECATED @27 :Float32;  # 起始加速度（已废弃）
+  vMaxDEPRECATED @20 :Float32;  # 最大速度（已废弃）
+  radarStateMonoTimeDEPRECATED @10 :UInt64;  # 雷达状态时间戳（已废弃）
+  jerkFactorDEPRECATED @6 :Float32;  # 加加速度因子（已废弃）
+  hasLeftLaneDEPRECATED @23 :Bool;  # 有左车道（已废弃）
+  hasRightLaneDEPRECATED @24 :Bool;  # 有右车道（已废弃）
+  aTargetMinDEPRECATED @4 :Float32;  # 最小目标加速度（已废弃）
+  aTargetMaxDEPRECATED @5 :Float32;  # 最大目标加速度（已废弃）
+  lateralValidDEPRECATED @0 :Bool;  # 横向有效（已废弃）
+  longitudinalValidDEPRECATED @2 :Bool;  # 纵向有效（已废弃）
+  dPolyDEPRECATED @1 :List(Float32);  # 距离多项式（已废弃）
+  laneWidthDEPRECATED @11 :Float32;  # 车道宽度（已废弃）
+  vCurvatureDEPRECATED @21 :Float32;  # 速度曲率（已废弃）
+  decelForTurnDEPRECATED @22 :Bool;  # 转弯减速（已废弃）
+  mapValidDEPRECATED @25 :Bool;  # 地图有效（已废弃）
+  radarValidDEPRECATED @28 :Bool;  # 雷达有效（已废弃）
+  radarCanErrorDEPRECATED @30 :Bool;  # 雷达CAN错误（已废弃）
+  commIssueDEPRECATED @31 :Bool;  # 通信问题（已废弃）
+  eventsDEPRECATED @13 :List(Car.CarEvent);  # 事件列表（已废弃）
+  gpsTrajectoryDEPRECATED @12 :GpsTrajectory;  # GPS轨迹（已废弃）
+  gpsPlannerActiveDEPRECATED @19 :Bool;  # GPS规划器激活（已废弃）
 
+  # GPS轨迹结构体（已废弃）
   struct GpsTrajectory {
-    x @0 :List(Float32);
-    y @1 :List(Float32);
+    x @0 :List(Float32);  # X坐标序列
+    y @1 :List(Float32);  # Y坐标序列
   }
 }
 struct UiPlan {
@@ -1103,75 +1155,80 @@ struct UiPlan {
   accel @1 :List(Float32);
 }
 
-struct LateralPlan @0xe1e9318e2ae8b51e {
-  modelMonoTime @31 :UInt64;
-  laneWidthDEPRECATED @0 :Float32;
-  lProbDEPRECATED @5 :Float32;
-  rProbDEPRECATED @7 :Float32;
-  dPathPoints @20 :List(Float32);
-  dProbDEPRECATED @21 :Float32;
+struct LateralPlan @0xe1e9318e2ae8b51e {  # 横向规划结构体，包含自动驾驶系统的横向控制规划信息
+  modelMonoTime @31 :UInt64;  # 模型时间戳，微秒级
+  laneWidth @0 :Float32;  # 车道宽度，米
+  lProbDEPRECATED @5 :Float32;  # 已废弃：左车道线概率
+  rProbDEPRECATED @7 :Float32;  # 已废弃：右车道线概率
+  dPathPoints @20 :List(Float32);  # 车道中心路径点数据
+  dProbDEPRECATED @21 :Float32;  # 已废弃：车道中心概率
 
-  mpcSolutionValid @9 :Bool;
-  desire @17 :Desire;
-  laneChangeState @18 :LaneChangeState;
-  laneChangeDirection @19 :LaneChangeDirection;
-  useLaneLines @29 :Bool;
+  mpcSolutionValid @9 :Bool;  # MPC求解器解的有效性标志
+  desire @17 :Desire;  # 车辆期望操作（如转向、变道等）
+  laneChangeState @18 :LaneChangeState;  # 车道变换状态
+  laneChangeDirection @19 :LaneChangeDirection;  # 车道变换方向
+  useLaneLines @29 :Bool;  # 是否使用车道线数据
 
   # desired curvatures over next 2.5s in rad/m
-  psis @26 :List(Float32);
-  curvatures @27 :List(Float32);
-  curvatureRates @28 :List(Float32);
+  psis @26 :List(Float32);  # 未来2.5秒内的航向角规划，弧度
+  curvatures @27 :List(Float32);  # 未来2.5秒内的曲率规划，弧度/米
+  curvatureRates @28 :List(Float32);  # 未来2.5秒内的曲率变化率规划
 
-  solverExecutionTime @30 :Float32;
-  solverCost @32 :Float32;
-  solverState @33 :SolverState;
+  solverExecutionTime @30 :Float32;  # 求解器执行时间，秒
+  solverCost @32 :Float32;  # 求解器成本函数值
+  solverState @33 :SolverState;  # 求解器内部状态数据
 
-  struct SolverState {
-    x @0 :List(List(Float32));
-    u @1 :List(Float32);
+  latDebugText @34 :Text;  # 横向控制调试文本信息
+
+  position @35 :XYZTData;  # 位置数据，包含x、y、z坐标和时间戳
+  distances @36 :List(Float32);  # 距离数据列表
+
+  struct SolverState {  # 求解器状态结构体
+    x @0 :List(List(Float32));  # 状态变量矩阵
+    u @1 :List(Float32);  # 控制变量向量
   }
 
-  enum Desire {
-    none @0;
-    turnLeft @1;
-    turnRight @2;
-    laneChangeLeft @3;
-    laneChangeRight @4;
-    keepLeft @5;
-    keepRight @6;
+  enum Desire {  # 车辆期望操作枚举
+    none @0;  # 无操作
+    turnLeft @1;  # 左转
+    turnRight @2;  # 右转
+    laneChangeLeft @3;  # 向左变道
+    laneChangeRight @4;  # 向右变道
+    keepLeft @5;  # 保持左车道
+    keepRight @6;  # 保持右车道
   }
 
-  enum LaneChangeState {
-    off @0;
-    preLaneChange @1;
-    laneChangeStarting @2;
-    laneChangeFinishing @3;
+  enum LaneChangeState {  # 车道变换状态枚举
+    off @0;  # 未进行车道变换
+    preLaneChange @1;  # 准备变道
+    laneChangeStarting @2;  # 开始变道
+    laneChangeFinishing @3;  # 完成变道
   }
 
-  enum LaneChangeDirection {
-    none @0;
-    left @1;
-    right @2;
+  enum LaneChangeDirection {  # 车道变换方向枚举
+    none @0;  # 无方向
+    left @1;  # 向左
+    right @2;  # 向右
   }
 
   # deprecated
-  curvatureDEPRECATED @22 :Float32;
-  curvatureRateDEPRECATED @23 :Float32;
-  rawCurvatureDEPRECATED @24 :Float32;
-  rawCurvatureRateDEPRECATED @25 :Float32;
-  cProbDEPRECATED @3 :Float32;
-  dPolyDEPRECATED @1 :List(Float32);
-  cPolyDEPRECATED @2 :List(Float32);
-  lPolyDEPRECATED @4 :List(Float32);
-  rPolyDEPRECATED @6 :List(Float32);
-  modelValidDEPRECATED @12 :Bool;
-  commIssueDEPRECATED @15 :Bool;
-  posenetValidDEPRECATED @16 :Bool;
-  sensorValidDEPRECATED @14 :Bool;
-  paramsValidDEPRECATED @10 :Bool;
-  steeringAngleDegDEPRECATED @8 :Float32; # deg
-  steeringRateDegDEPRECATED @13 :Float32; # deg/s
-  angleOffsetDegDEPRECATED @11 :Float32;
+  curvatureDEPRECATED @22 :Float32;  # 已废弃：曲率
+  curvatureRateDEPRECATED @23 :Float32;  # 已废弃：曲率变化率
+  rawCurvatureDEPRECATED @24 :Float32;  # 已废弃：原始曲率
+  rawCurvatureRateDEPRECATED @25 :Float32;  # 已废弃：原始曲率变化率
+  cProbDEPRECATED @3 :Float32;  # 已废弃：中心线概率
+  dPolyDEPRECATED @1 :List(Float32);  # 已废弃：车道中心多项式系数
+  cPolyDEPRECATED @2 :List(Float32);  # 已废弃：中心线多项式系数
+  lPolyDEPRECATED @4 :List(Float32);  # 已废弃：左车道线多项式系数
+  rPolyDEPRECATED @6 :List(Float32);  # 已废弃：右车道线多项式系数
+  modelValidDEPRECATED @12 :Bool;  # 已废弃：模型有效性标志
+  commIssueDEPRECATED @15 :Bool;  # 已废弃：通信问题标志
+  posenetValidDEPRECATED @16 :Bool;  # 已废弃：位置网络有效性标志
+  sensorValidDEPRECATED @14 :Bool;  # 已废弃：传感器有效性标志
+  paramsValidDEPRECATED @10 :Bool;  # 已废弃：参数有效性标志
+  steeringAngleDegDEPRECATED @8 :Float32; # deg  # 已废弃：方向盘角度，度
+  steeringRateDegDEPRECATED @13 :Float32; # deg/s  # 已废弃：方向盘角速度，度/秒
+  angleOffsetDegDEPRECATED @11 :Float32;  # 已废弃：角度偏移，度
 }
 
 struct LiveLocationKalman {
@@ -2329,13 +2386,14 @@ struct Event {
     customReservedRawData0 @124 :Data;
     customReservedRawData1 @125 :Data;
     customReservedRawData2 @126 :Data;
+    navInstructionCarrot @128 :NavInstruction;
 
     # *********** Custom: reserved for forks ***********
     liveMapData @107 :Custom.LiveMapData;
     longitudinalPlanExt @108 :Custom.LongitudinalPlanExt;
     lateralPlanExt @109 :Custom.LateralPlanExt;
     controlsStateExt @110 :Custom.ControlsStateExt;
-    customReserved4 @111 :Custom.CustomReserved4;
+    carrotMan @111 :Custom.CarrotMan;
     customReserved5 @112 :Custom.CustomReserved5;
     customReserved6 @113 :Custom.CustomReserved6;
     customReserved7 @114 :Custom.CustomReserved7;

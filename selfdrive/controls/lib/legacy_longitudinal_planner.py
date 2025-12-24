@@ -281,35 +281,40 @@ class LongitudinalPlanner:
 
     # 改进的前车状态检测逻辑
     if self.lead_start_enabled and sm['radarState'].leadOne.status:
-            lead = sm['radarState'].leadOne
-            current_time = sm.logMonoTime['radarState'] / 1e9
-            v_ego = sm['carState'].vEgo
-            # 综合判定前车停止状态
-            is_stopped = (lead.vLead < 0.3 and
-                        lead.dRel < 30.0 and  # 距离阈值
-                        v_ego < 1.0)      # 自车速度限制 (修改为 1.0 m/s)
-            if is_stopped:
-                # 如果确认前车已停止，更新停止时间戳，并重置起步和提醒状态
-                # 仅在首次检测到停止或距离上次更新超过一定时间（例如0.5秒）时更新时间戳，避免频繁更新
-                if not self.lead_started or (current_time - self.lead_stopped_time) > 0.5:
-                   self.lead_stopped_time = current_time
-                self.lead_started = False
-                self.lead_start_alert = False
-            # 检测前车起步状态 (当前未记录为起步，且满足起步条件)
-            elif not self.lead_started and lead.vLead > self.lead_start_threshold and \
-                (current_time - self.lead_stopped_time) > self.lead_stop_threshold:
-                # 如果前车速度超过起步阈值，并且距离上次确认停止的时间超过停止阈值
-                self.lead_started = True      # 标记为已起步
-                self.lead_start_alert = True  # 标记本周期需要提醒
-                if hasattr(EventName, 'leadStartAlert'): # 触发事件
-                    self.events.add(EventName.leadStartAlert)
-            else:
-                # 如果不满足停止或起步条件，则本周期不提醒
-                self.lead_start_alert = False
-    else:
-        # 如果功能未启用或未检测到前车，则重置状态
+      lead = sm['radarState'].leadOne
+      current_time = sm.logMonoTime['radarState'] / 1e9
+      v_ego = sm['carState'].vEgo
+      
+      # 综合判定前车停止状态 - 简化条件，提高可靠性
+      is_stopped = (lead.vLead < 0.3 and lead.dRel < 30.0)
+      
+      if is_stopped:
+        # 更新停止时间戳
+        self.lead_stopped_time = current_time
         self.lead_started = False
         self.lead_start_alert = False
+      # 检测前车起步状态
+      elif not self.lead_started and lead.vLead > self.lead_start_threshold and \
+           (current_time - self.lead_stopped_time) > self.lead_stop_threshold and \
+           lead.dRel < 30.0:  # 确保前车仍在范围内
+        
+        self.lead_started = True
+        self.lead_start_alert = True
+        
+        # 确保事件名称存在并触发
+        if hasattr(EventName, 'leadStartAlert'):
+          self.events.add(EventName.leadStartAlert)
+          # 额外的日志记录用于调试
+          cloudlog.info(f"Lead start alert triggered: lead speed={lead.vLead} m/s, lead distance={lead.dRel} m")
+        else:
+          # 如果事件未定义，创建自定义提醒
+          cloudlog.warning("Lead start alert event not defined, but conditions met")
+      else:
+        self.lead_start_alert = False
+    else:
+      # 功能未启用或未检测到前车，重置状态
+      self.lead_started = False
+      self.lead_start_alert = False
 
   def publish(self, sm, pm):
     plan_send = messaging.new_message('longitudinalPlan')
@@ -365,6 +370,8 @@ class LongitudinalPlanner:
     if self.vision_turn_controller.is_active:
       a_solutions['turn'] = self.vision_turn_controller.a_target
       v_solutions['turn'] = self.vision_turn_controller.v_turn
+      # 记录弯道减速参数信息，不影响原有逻辑
+      cloudlog.info(f"弯道减速激活: state={self.vision_turn_controller.state}, v_turn={self.vision_turn_controller.v_turn:.2f}, a_target={self.vision_turn_controller.a_target:.2f}, v_ego={v_ego:.2f}, v_cruise={v_cruise:.2f}")
 
     source = min(v_solutions, key=v_solutions.get)
 
