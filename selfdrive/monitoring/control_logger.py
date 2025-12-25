@@ -78,25 +78,26 @@ class ControlDataLogger:
         if curr_time - self.last_error_time < self.error_cooldown:
             return
 
-        payload = {
-            'time': time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-            'issues': issues,
-            'data': snapshot
-        }
-        
-        file_path = self.log_dir / f"error_{int(curr_time)}.json"
-        try:
-            with open(file_path, 'w') as f:
-                json.dump(payload, f, indent=2)
-            self.last_error_time = curr_time
-            cloudlog.warning(f"检测到控制异常并记录: {file_path}")
-            
-            # 自动清理：仅保留最近 30 个报错文件
-            files = sorted(list(self.log_dir.glob("error_*.json")), key=lambda x: x.stat().st_mtime)
-            if len(files) > 30:
-                for f in files[:-30]: f.unlink()
-        except:
-            pass
+        # 注释掉JSON保存操作
+        # payload = {
+        #     'time': time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+        #     'issues': issues,
+        #     'data': snapshot
+        # }
+        # 
+        # file_path = self.log_dir / f"error_{int(curr_time)}.json"
+        # try:
+        #     with open(file_path, 'w') as f:
+        #         json.dump(payload, f, indent=2)
+        #     self.last_error_time = curr_time
+        #     cloudlog.warning(f"检测到控制异常并记录: {file_path}")
+        #     
+        #     # 自动清理：仅保留最近 30 个报错文件
+        #     files = sorted(list(self.log_dir.glob("error_*.json")), key=lambda x: x.stat().st_mtime)
+        #     if len(files) > 30:
+        #         for f in files[:-30]: f.unlink()
+        # except:
+        #     pass
 
     def log_loop(self):
         # 降低优先级

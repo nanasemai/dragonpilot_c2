@@ -93,7 +93,6 @@ class LongitudinalPlanner:
     - init_v: 初始速度
     - init_a: 初始加速度
     """
-    self.events = Events()  # 初始化事件管理器
     self.acm = ACM()
     self.acm_enabled = False
     self.acm_param = False
@@ -131,10 +130,12 @@ class LongitudinalPlanner:
     self.dp_long_use_krkeegen_tune_active = False
     # 停车判定
     self.lead_start_alert = False  # 前车起步提醒标志
-    self.lead_stopped_time = 0     # 前车停止时间
+    self.lead_stopped_time = float('inf')  # 前车停止时间，初始值设为无穷大避免误触发
     self.lead_started = False      # 前车起步状态
+    self.lead_was_stopped = False  # 上一帧前车是否停止
     self.lead_start_threshold = 0.3  # 默认0.3 m/s
     self.lead_stop_threshold = 3.0   # 默认3.0秒
+    self.lead_start_alert_duration = 0  # 新增：提醒持续计数器
     self.desired_follow_distance = float('nan')  # 初始化为NaN表示无效值
 
   def read_param(self):
@@ -155,7 +156,7 @@ class LongitudinalPlanner:
   def update(self, sm):
     """更新规划器状态和计算控制输出
     主要步骤：
-    1. 更新参数配置
+    1. 更新参数配置lead_start_enabled
     2. 计算速度和加速度限制
     3. 执行MPC优化
     4. 生成控制轨迹
@@ -284,37 +285,44 @@ class LongitudinalPlanner:
       lead = sm['radarState'].leadOne
       current_time = sm.logMonoTime['radarState'] / 1e9
       v_ego = sm['carState'].vEgo
-      
       # 综合判定前车停止状态 - 简化条件，提高可靠性
-      is_stopped = (lead.vLead < 0.3 and lead.dRel < 30.0)
-      
+      is_stopped = (lead.vLead < self.lead_start_threshold and lead.dRel < 30.0)
       if is_stopped:
-        # 更新停止时间戳
-        self.lead_stopped_time = current_time
+        # 前车停止状态
+        if not self.lead_was_stopped:
+          self.lead_stopped_time = current_time
+        self.lead_was_stopped = True
         self.lead_started = False
         self.lead_start_alert = False
+        self.lead_start_alert_duration = 0
       # 检测前车起步状态
-      elif not self.lead_started and lead.vLead > self.lead_start_threshold and \
+      elif self.lead_was_stopped and not self.lead_started and \
+           lead.vLead > self.lead_start_threshold and \
+           v_ego < 0.5 and \
            (current_time - self.lead_stopped_time) > self.lead_stop_threshold and \
-           lead.dRel < 30.0:  # 确保前车仍在范围内
-        
-        self.lead_started = True
-        self.lead_start_alert = True
-        
-        # 确保事件名称存在并触发
-        if hasattr(EventName, 'leadStartAlert'):
-          self.events.add(EventName.leadStartAlert)
-          # 额外的日志记录用于调试
-          cloudlog.info(f"Lead start alert triggered: lead speed={lead.vLead} m/s, lead distance={lead.dRel} m")
-        else:
-          # 如果事件未定义，创建自定义提醒
-          cloudlog.warning("Lead start alert event not defined, but conditions met")
+           lead.dRel < 30.0:
+            # 触发前车起步提醒
+            self.lead_started = True
+            self.lead_start_alert = True
+            self.lead_start_alert_duration = 40  # 持续2秒 (假设20Hz)
+            # 额外的日志记录用于调试
+            cloudlog.info(f"Lead start alert triggered: lead speed={lead.vLead:.2f} m/s, lead distance={lead.dRel:.1f} m")
       else:
-        self.lead_start_alert = False
+        # 其他情况：递减提醒持续时间
+        if self.lead_start_alert_duration > 0:
+          self.lead_start_alert_duration -= 1
+          self.lead_start_alert = True
+        else:
+          self.lead_start_alert = False
+        # 注意：不要在这里重置 lead_was_stopped！
+        # 只有当前车重新停止或丢失时才重置
     else:
-      # 功能未启用或未检测到前车，重置状态
+      # 功能未启用或未检测到前车
       self.lead_started = False
       self.lead_start_alert = False
+      self.lead_was_stopped = False
+      self.lead_stopped_time = float('inf')  # 添加这行
+      self.lead_start_alert_duration = 0
 
   def publish(self, sm, pm):
     plan_send = messaging.new_message('longitudinalPlan')
@@ -356,6 +364,8 @@ class LongitudinalPlanner:
     longitudinalPlanExt.dpE2EIsBlended = False
 
     longitudinalPlanExt.longitudinalPlanExtSource = self.mpc.source if self.mpc.source != 'cruise' else self.cruise_source
+    # 添加前车起步提醒状态
+    longitudinalPlanExt.leadStartAlert = self.lead_start_alert
     pm.send('longitudinalPlanExt', plan_ext_send)
 
   # mapd

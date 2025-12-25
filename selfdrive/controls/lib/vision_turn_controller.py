@@ -9,38 +9,28 @@ import cereal.messaging as messaging
 
 TRAJECTORY_SIZE = 33
 _MIN_V = 5.6  # Do not operate under 20km/h
-
-# 代码级优化 (C2 + Corolla 专属调优) 
-# 修改 1: 触发阈值微调 (避免 C2 噪点导致的幽灵刹车)
-# 0.8 -> 0.9: 过滤直线行驶时的模型抖动
-_ENTERING_PRED_LAT_ACC_TH = 0.9
-_ABORT_ENTERING_PRED_LAT_ACC_TH = 0.7  # 保持 0.2 的迟滞区间
-
-_TURNING_LAT_ACC_TH = 0.75
-_LEAVING_LAT_ACC_TH = 0.8
-_FINISH_LAT_ACC_TH = 0.7
+_ENTERING_PRED_LAT_ACC_TH = 1.1 
+_ABORT_ENTERING_PRED_LAT_ACC_TH = 0.9  
+_TURNING_LAT_ACC_TH = 1.2  
+_LEAVING_LAT_ACC_TH = 0.8  
+_FINISH_LAT_ACC_TH = 0.6 
 
 _EVAL_STEP = 3.
-# 修改 2: 预测范围 (C2 最佳可视范围)
 _EVAL_START = 10.
-_EVAL_LENGHT = 120. # C2 100米外数据不仅不准而且跳变大
+_EVAL_LENGHT = 120.
 _EVAL_RANGE = np.arange(_EVAL_START, _EVAL_LENGHT, _EVAL_STEP)
-
-# 修改 3: 最大横向加速度限制
-# 1.5 -> 1.8: 1.5 在高速缓弯会减速太严重(阻碍车流)，1.8 更符合正常驾驶体感
-_A_LAT_REG_MAX = 1.8
-
+_A_LAT_REG_MAX = 2.0 
 _NO_OVERSHOOT_TIME_HORIZON = 3.
 
-# 修改 4: 减速力度 (针对 Corolla 刹车线性度优化)
-# 保持激进但稍微平滑起步，避免“点头”
 # Lookup table for the minimum smooth deceleration during the ENTERING state
-_ENTERING_SMOOTH_DECEL_V = [-0.6, -2.0]  # 起始减速稍微加强，确保响应
-_ENTERING_SMOOTH_DECEL_BP = [0.9, 2.0]   # 对应新的阈值
+_ENTERING_SMOOTH_DECEL_V = [-0.1, -0.4, -0.6]  
+_ENTERING_SMOOTH_DECEL_BP = [1.1, 1.5, 2.0]   
 
 # Lookup table for the acceleration for the TURNING state
-_TURNING_ACC_V = [0.0, -0.5, -1.0]
-_TURNING_ACC_BP = [0.9, 1.5, 2.0]
+_TURNING_ACC_V = [0.0, -0.1, -0.3] 
+_TURNING_ACC_BP = [1.2, 1.5, 2.0]
+
+
 
 _LEAVING_ACC = 0.5  # Confortble acceleration to regain speed while leaving a turn.
 
@@ -111,10 +101,6 @@ class VisionTurnController():
     self._state = VisionTurnControllerState.disabled
     self._sm = messaging.SubMaster(['lateralPlanExt'])
     
-    # 参数读取频率控制计数器
-    self._params_counter = 0
-    self._PARAMS_UPDATE_INTERVAL = 50  # 50帧更新一次（假设100Hz循环，即0.5秒更新一次）
-    
     # 初始化自定义参数
     self.turn_sensitivity = 1.0  # 弯道检测灵敏度系数
     self.decel_ratio = 1.0  # 减速强度系数
@@ -123,7 +109,9 @@ class VisionTurnController():
     # 平滑处理相关变量
     self._a_target_last = 0.0  # 上一次的目标加速度
     self._v_turn_last = 0.0  # 上一次的目标速度
-    self._SMOOTH_ALPHA = 0.2  # 平滑系数
+    self._SMOOTH_ALPHA = 0.1  # 平滑系数（降低变化速度，更平缓）
+    
+
     
     # 应用参数调整后的实际值
     self.entering_lat_acc_th = _ENTERING_PRED_LAT_ACC_TH
@@ -140,17 +128,20 @@ class VisionTurnController():
     """读取并更新UI参数"""
     try:
       # 读取弯道检测灵敏度系数 (UI值的0.1倍)
-      self.turn_sensitivity = self._params.get_float("dp_vt_sensitivity") / 10.0
+      sensitivity_str = self._params.get("dp_vt_sensitivity", encoding="utf8")
+      self.turn_sensitivity = float(sensitivity_str) / 10.0 if sensitivity_str is not None else 10.0
       if self.turn_sensitivity <= 0.1:  # 防止值过小
         self.turn_sensitivity = 1.0
         
       # 读取减速强度系数 (UI值的0.1倍)
-      self.decel_ratio = self._params.get_float("dp_vt_decel_ratio") / 10.0
+      decel_str = self._params.get("dp_vt_decel_ratio", encoding="utf8")
+      self.decel_ratio = float(decel_str) / 10.0 if decel_str is not None else 10.0
       if self.decel_ratio <= 0.1:  # 防止值过小
         self.decel_ratio = 1.0
         
       # 读取弯道速度系数 (UI值的0.1倍)
-      self.turn_speed_ratio = self._params.get_float("dp_vt_speed_ratio") / 10.0
+      speed_str = self._params.get("dp_vt_speed_ratio", encoding="utf8")
+      self.turn_speed_ratio = float(speed_str) / 10.0 if speed_str is not None else 10.0
       if self.turn_speed_ratio <= 0.1:  # 防止值过小
         self.turn_speed_ratio = 1.0
       
@@ -212,6 +203,8 @@ class VisionTurnController():
     self._max_pred_lat_acc = 0.
     self._v_overshoot_distance = 200.
     self._lat_acc_overshoot_ahead = False
+    # 重置时，将v_turn_last初始化为当前巡航速度或车速，避免从0开始的抖动
+    self._v_turn_last = max(self._v_cruise_setpoint, self._v_ego, V_CRUISE_MAX * CV.KPH_TO_MS)
 
   def _update_calculations(self, sm):
     # Get path polynomial aproximation for curvature estimation from model data.
@@ -298,6 +291,8 @@ class VisionTurnController():
       self._v_overshoot = min(self._v_overshoot * speed_reduction_factor, self._v_cruise_setpoint)
       _debug(f'TVC: High LatAcc. Dist: {self._v_overshoot_distance:.2f}, v: {self._v_overshoot * CV.MS_TO_KPH:.2f}')
 
+
+
   def _state_transition(self):
     # In any case, if system is disabled or the feature is disabeld or gas is pressed, disable.
     if not self._op_enabled or not self._is_enabled or self._gas_pressed:
@@ -345,7 +340,8 @@ class VisionTurnController():
       if self._lat_acc_overshoot_ahead:
         # 应用弯道速度系数调整目标速度
         v_overshoot_adjusted = self._v_overshoot * self.turn_speed_ratio
-        a_target = min((v_overshoot_adjusted**2 - self._v_ego**2) / (2 * self._v_overshoot_distance), a_target)
+        overshoot_a_target = min((v_overshoot_adjusted**2 - self._v_ego**2) / (2 * self._v_overshoot_distance), a_target)
+        a_target = min(a_target, overshoot_a_target)
       _debug(f'TVC Entering: Overshooting: {self._lat_acc_overshoot_ahead}')
       _debug(f'    Decel: {a_target:.2f}, target v: {self.v_turn * CV.MS_TO_KPH}')
     # TURNING
@@ -367,11 +363,6 @@ class VisionTurnController():
     self._a_ego = a_ego
     self._v_cruise_setpoint = v_cruise_setpoint
 
-    # 定期更新参数 - 使用计数器控制频率
-    self._params_counter += 1
-    if self._params_counter >= self._PARAMS_UPDATE_INTERVAL:
-      self._update_params()
-      self._params_counter = 0
     self._update_calculations(sm)
     self._state_transition()
     self._update_solution()

@@ -145,7 +145,7 @@ class Controls:
       if NO_IR_CTRL:
         ignore += ['driverCameraState', 'driverMonitoringState']
       self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'liveCalibration',
-                                     'driverMonitoringState', 'longitudinalPlan', 'lateralPlan', 'liveLocationKalman',
+                                     'driverMonitoringState', 'longitudinalPlan', 'longitudinalPlanExt', 'lateralPlan', 'liveLocationKalman',
                                      'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters', 'testJoystick'] + self.camera_packets,
                                     ignore_alive=ignore, ignore_avg_freq=['radarState', 'testJoystick'])
 
@@ -540,6 +540,12 @@ class Controls:
     planner_fcw = self.sm['longitudinalPlan'].fcw and self.enabled
     if planner_fcw or model_fcw:
       self.events.add(EventName.fcw)
+
+    # Check for lead start alert
+    if self.sm.updated['longitudinalPlanExt']:
+      lead_start_alert = self.sm['longitudinalPlanExt'].leadStartAlert
+      if lead_start_alert:
+        self.events.add(EventName.leadStartAlert)
 
     for m in messaging.drain_sock(self.log_sock, wait_for_one=False):
       try:

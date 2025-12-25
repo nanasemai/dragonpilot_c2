@@ -214,12 +214,12 @@ class CarState(CarStateBase):
     ret.steerFaultTemporary = lka_state in TEMP_STEER_FAULTS
     ret.steerFaultPermanent = lka_state in PERM_STEER_FAULTS
 
-    if lka_state != getattr(self, '_prev_lka_state', -1):
-        if ret.steerFaultPermanent:
-            cloudlog.error(f"Toyota EPS LKA Fault: State changed to {lka_state} (Permanent)")
-        elif ret.steerFaultTemporary:
-            cloudlog.warning(f"Toyota EPS LKA Fault: State changed to {lka_state} (Temporary)")
-        self._prev_lka_state = lka_state
+    #if lka_state != getattr(self, '_prev_lka_state', -1):
+    #    if ret.steerFaultPermanent:
+    #        cloudlog.error(f"Toyota EPS LKA Fault: State changed to {lka_state} (Permanent)")
+    #    elif ret.steerFaultTemporary:
+    #        cloudlog.warning(f"Toyota EPS LKA Fault: State changed to {lka_state} (Temporary)")
+    #    self._prev_lka_state = lka_state
 
     # 如果是角度控制类型，还需要检查LTA状态
     if self.CP.steerControlType == SteerControlType.angle:
@@ -229,12 +229,12 @@ class CarState(CarStateBase):
       ret.steerFaultTemporary = ret.steerFaultTemporary or lta_fault_temp
       ret.steerFaultPermanent = ret.steerFaultPermanent or lta_fault_perm
 
-      if lta_state != getattr(self, '_prev_lta_state', -1):
-          if lta_fault_perm:
-              cloudlog.error(f"Toyota EPS LTA Fault: State changed to {lta_state} (Permanent)")
-          elif lta_fault_temp:
-              cloudlog.warning(f"Toyota EPS LTA Fault: State changed to {lta_state} (Temporary)")
-          self._prev_lta_state = lta_state
+      #if lta_state != getattr(self, '_prev_lta_state', -1):
+      #    if lta_fault_perm:
+      #        cloudlog.error(f"Toyota EPS LTA Fault: State changed to {lta_state} (Permanent)")
+      #    elif lta_fault_temp:
+      #        cloudlog.warning(f"Toyota EPS LTA Fault: State changed to {lta_state} (Temporary)")
+      #    self._prev_lta_state = lta_state
 
     # 处理不同车型的巡航控制状态
     if self.CP.carFingerprint in UNSUPPORTED_DSU_CAR:  # 不支持DSU的车型

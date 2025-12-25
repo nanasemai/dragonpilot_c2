@@ -100,6 +100,14 @@ class CarController:
     self.dp_toyota_auto_unlock = p.get_bool("dp_toyota_auto_unlock")
     self.dp_toyota_sng = p.get_bool("dp_toyota_sng")
 
+    # 转向安全余量参数初始化
+    steer_rate_safety_margin_str = p.get("dp_toyota_steer_rate_safety_margin", encoding="utf8")
+    try:
+      self.steer_rate_safety_margin = int(steer_rate_safety_margin_str) if steer_rate_safety_margin_str is not None else 10
+      self.steer_rate_safety_margin = max(10, min(200, self.steer_rate_safety_margin))  # 限制在10-200范围内
+    except (ValueError, TypeError):
+      self.steer_rate_safety_margin = 10  # 默认安全余量
+
     # 盲点监测相关初始化
     self.dp_toyota_enhanced_bsm = p.get_bool("dp_toyota_enhanced_bsm")
     self._blindspot_debug_enabled_left = False
@@ -146,42 +154,24 @@ class CarController:
     self._handle_blindspot_monitoring(CS, can_sends)
 
     # *** steer torque ***
-    # 极端转向率安全检查 (仅在无人为干预且>250 deg/s时立即禁用)
-    extreme_steer_rate = abs(CS.out.steeringRateDeg) > 250 and not CS.out.steeringPressed
-    if extreme_steer_rate:
-      apply_steer = 0
-      apply_steer_req = False
-      cloudlog.warning(f"Toyota LKAS: Extreme Steer Rate detected - Immediate Cutoff: {CS.out.steeringRateDeg:.1f} deg/s")
-    else:
-      # 计算转向扭矩并应用限制
-      new_steer = int(round(CC.actuators.steer * self.params.STEER_MAX))
-      apply_steer = apply_meas_steer_torque_limits(new_steer, self.last_steer, CS.out.steeringTorqueEps, self.params)
-
-      # 饱和监控 (排除人为干预)
-      if abs(apply_steer) >= self.params.STEER_MAX and not CS.out.steeringPressed:
-        self.steer_saturation_counter += 1
-        if self.steer_saturation_counter > 50 and self.steer_saturation_counter % 50 == 0:
-          cloudlog.warning(f"Toyota LKAS: Saturation Detected - Max Torque for {self.steer_saturation_counter} frames")
-      else:
-        self.steer_saturation_counter = 0
-
-      # 高转向率检查与故障预防 (排除人为干预)
-      high_steer_rate = abs(CS.out.steeringRateDeg) >= MAX_STEER_RATE and not CS.out.steeringPressed
-      if high_steer_rate and abs(CS.out.steeringRateDeg) >= 200 and self.steer_rate_counter < MAX_STEER_RATE_FRAMES:
-        cloudlog.warning(f"Toyota LKAS: High Steer Rate detected: {CS.out.steeringRateDeg:.1f} deg/s > 200")
-
-      # 调用故障预防函数
-      self.steer_rate_counter, apply_steer_req = common_fault_avoidance(high_steer_rate, CC.latActive,
-                                                                       self.steer_rate_counter, MAX_STEER_RATE_FRAMES)
-
-      # 故障触发日志
-      if not apply_steer_req and CC.latActive and self.steer_rate_counter >= MAX_STEER_RATE_FRAMES:
-        cloudlog.warning(f"Toyota LKAS: Steer Fault Triggered (Rate Limit Exceeded) - Frame: {self.frame}")
-
     # 非横向激活状态下禁用转向
     if not CC.latActive:
       apply_steer = 0
       apply_steer_req = False
+    else:
+      # 转向率安全检查 (使用参数化的安全余量)
+      if abs(CS.out.steeringRateDeg) > MAX_STEER_RATE + self.steer_rate_safety_margin:
+        apply_steer = 0
+        apply_steer_req = False
+        #cloudlog.warning(f"Toyota LKAS: Steer Rate Limit Exceeded: {CS.out.steeringRateDeg:.1f} deg/s (Margin: {self.steer_rate_safety_margin})")
+      else:
+        # 计算转向扭矩并应用限制
+        new_steer = int(round(CC.actuators.steer * self.params.STEER_MAX))
+        apply_steer = apply_meas_steer_torque_limits(new_steer, self.last_steer, CS.out.steeringTorqueEps, self.params)
+
+    # 调用故障预防函数
+    self.steer_rate_counter, apply_steer_req = common_fault_avoidance(abs(CS.out.steeringRateDeg) >= MAX_STEER_RATE, CC.latActive,
+                                                                      self.steer_rate_counter, MAX_STEER_RATE_FRAMES)
 
     # *** steer angle 转向角度 ***
     if self.CP.steerControlType == SteerControlType.angle:
@@ -200,11 +190,11 @@ class CarController:
         apply_angle = apply_std_steer_angle_limits(apply_angle, self.last_angle, CS.out.vEgoRaw, self.params)
 
         # LTA转向响应优化
-        lta_active = CC.latActive and self.CP.steerControlType == SteerControlType.angle
-        if lta_active and self.CP.carFingerprint in TSS2_CAR:
+        #lta_active = CC.latActive and self.CP.steerControlType == SteerControlType.angle
+        #if lta_active and self.CP.carFingerprint in TSS2_CAR:
           # 根据车速动态调整转向响应
           # 根据车速动态调整转向响应（steer_rate_limit 当前未使用，保留供后续优化）
-          steer_rate_limit = interp(CS.out.vEgo, [0, 10, 20], [100, 50, 25])
+          # steer_rate_limit = interp(CS.out.vEgo, [0, 10, 20], [100, 50, 25])
           # 注意：移除了直接乘以steer_rate_scale的逻辑，因为apply_std_steer_angle_limits已经处理了角度变化率限制
           # 避免了直接修改目标角度导致的蛇形摆动问题
 

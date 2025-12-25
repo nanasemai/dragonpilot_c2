@@ -136,6 +136,8 @@ def manager_init() -> None:
     ("dp_panda_monitoring", "0"),  # Panda性能监控功能开关，默认关闭
     # 控制性能监控参数
     ("dp_control_monitoring", "0"),  # 控制性能监控功能开关，默认关闭
+    # 丰田转向安全余量参数
+    ("dp_toyota_steer_rate_safety_margin", "10"),  # 转向安全余量(deg/s)，默认10
   ]
   if not PC:
     default_params.append(("LastUpdateTime", datetime.datetime.utcnow().isoformat().encode('utf8')))

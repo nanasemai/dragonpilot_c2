@@ -109,20 +109,21 @@ class PandaDataLogger:
         if curr_time - self.last_error_time < self.error_cooldown:
             return
 
-        payload = {
-            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "issues": issues,
-            "snapshot": snapshot
-        }
-        
-        file_path = self.log_dir / f"error_{int(curr_time)}.json"
-        try:
-            with open(file_path, 'w') as f:
-                json.dump(payload, f, indent=2)
-            self.last_error_time = curr_time
-            cloudlog.error(f"Panda/LKAS异常已记录: {issues}")
-        except:
-            pass
+        # 注释掉JSON保存操作
+        # payload = {
+        #     "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        #     "issues": issues,
+        #     "snapshot": snapshot
+        # }
+        # 
+        # file_path = self.log_dir / f"error_{int(curr_time)}.json"
+        # try:
+        #     with open(file_path, 'w') as f:
+        #         json.dump(payload, f, indent=2)
+        #     self.last_error_time = curr_time
+        #     cloudlog.error(f"Panda/LKAS异常已记录: {issues}")
+        # except:
+        #     pass
 
     def cleanup_logs(self):
         try:
