@@ -74,7 +74,7 @@ class CarInterface(CarInterfaceBase):
     found_ecus = [fw.ecu for fw in car_fw]
     ret.enableDsu = len(found_ecus) > 0 and Ecu.dsu not in found_ecus and candidate not in (NO_DSU_CAR | UNSUPPORTED_DSU_CAR) \
                     and not (ret.flags & ToyotaFlags.SMART_DSU)
-	  # 各车型特定参数配置
+    # 各车型特定参数配置
     if Ecu.hybrid in found_ecus:
         ret.flags |= ToyotaFlags.HYBRID.value
     if candidate == CAR.PRIUS:
@@ -98,7 +98,7 @@ class CarInterface(CarInterfaceBase):
       ret.mass = 3340. * CV.LB_TO_KG
 
     elif candidate in (CAR.RAV4, CAR.RAV4H):
-      stop_and_go = True if (candidate in CAR.RAV4H) else False
+      stop_and_go = (candidate == CAR.RAV4H)
       ret.wheelbase = 2.65
       ret.steerRatio = 16.88   # 14.5 is spec end-to-end
       ret.tireStiffnessFactor = 0.5533
@@ -346,7 +346,7 @@ class CarInterface(CarInterfaceBase):
       ret.vEgoStarting = 0.25  # 起步时的速度阈值
       ret.stoppingDecelRate = max(0.009, ret.stoppingDecelRate)  # 确保减速率不会太小
       ret.stopAccel = min(-2.0, ret.stopAccel)  # 确保停车加速度不会太大
-	    # Hybrids have much quicker longitudinal actuator response
+      # Hybrids have much quicker longitudinal actuator response
       if ret.flags & ToyotaFlags.HYBRID.value:
         ret.longitudinalActuatorDelay = 0.05
     # PID 控制器参数

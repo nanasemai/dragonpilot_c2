@@ -63,10 +63,18 @@ class AccelController:
 
     a_cruise_min = interp(v_ego, _DP_CRUISE_MIN_BP, min_v)
     a_cruise_max = interp(v_ego, _DP_CRUISE_MAX_BP, max_v)
-    return a_cruise_min, a_cruise_max
+    return [a_cruise_min, a_cruise_max]
 
   def get_accel_limits(self, v_ego, accel_limits):
-    return accel_limits if self._profile == DP_ACCEL_STOCK else self._dp_calc_cruise_accel_limits(v_ego)
+    if self._profile == DP_ACCEL_STOCK:
+      return accel_limits
+    
+    custom_min, custom_max = self._dp_calc_cruise_accel_limits(v_ego)
+    # 确保不会比原厂规定的安全制动限值更弱
+    safe_min = min(custom_min, accel_limits[0])
+    # 将加速度限制在舒适区间内，但不超过原厂最大值
+    safe_max = min(custom_max, accel_limits[1])
+    return [safe_min, safe_max]
 
   def is_enabled(self):
     return self._profile != DP_ACCEL_STOCK

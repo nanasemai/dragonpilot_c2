@@ -90,7 +90,7 @@ class Dashcamd:
       self.DASHCAM_DURATION = self.config['duration']  # 直接使用配置值
       self.DASHCAM_BIT_RATES = self.quality_settings["bitrate"]
       self.DASHCAM_MAX_SIZE_PER_FILE = self.DASHCAM_BIT_RATES / 8 * self.DASHCAM_DURATION
-      self.DASHCAM_FREESPACE_LIMIT = 20  # 20%空间预留
+      self.DASHCAM_FREESPACE_LIMIT = 10  # 10%空间预留
       kept_hours = max(1, min(72, self.config['kept_hours']))  # 限制在1-72小时之间
       self.DASHCAM_KEPT_MIN_SIZE = self.DASHCAM_MAX_SIZE_PER_FILE * (kept_hours * 60 * 60 / self.DASHCAM_DURATION)
 
@@ -138,6 +138,13 @@ class Dashcamd:
       return
 
     # 先清理空间
+    # 优化: 确保录制目录存在，防止运行时意外删除
+    if not os.path.exists(self.video_dir):
+      try:
+        Path(self.video_dir).mkdir(parents=True, exist_ok=True)
+      except Exception:
+        pass
+
     self._clean_up_space()
 
     try:
@@ -186,84 +193,106 @@ class Dashcamd:
       self._record_next_file()
 
   def _clean_up_space(self):
-      with self.cleanup_lock:
-          try:
-              current_time = time.time()
-              # 检查是否需要清理：空间不足 或 已用空间超过保留时长限制 或 超过清理间隔
-              need_clean = (
-                  self.free_space < self.DASHCAM_FREESPACE_LIMIT or
-                  self._get_used_space() > self.DASHCAM_KEPT_MIN_SIZE or
-                  (current_time - self.last_clean_time > self.CLEAN_INTERVAL)
-              )
+    with self.cleanup_lock:
+      try:
+        # 1. 获取准确的磁盘空间信息
+        try:
+          stat = os.statvfs(self.video_dir)
+          # available_bytes: 非特权用户可用空间
+          available_bytes = stat.f_bavail * stat.f_frsize
+          total_bytes = stat.f_blocks * stat.f_frsize
+        except OSError:
+          # Fallback: 如果 statvfs 失败，使用 factory reset 后的估算或 systemd 传入的值
+          total_bytes = self._get_total_space()
+          available_bytes = (self.free_space / 100.0) * total_bytes
 
-              if not need_clean:
-                  # 如果不需要清理，只清理空文件并返回
-                  for f in os.listdir(self.video_dir):
-                      full_path = os.path.join(self.video_dir, f)
-                      if os.path.isfile(full_path) and os.path.getsize(full_path) == 0:
-                          try:
-                              os.remove(full_path)
-                              cloudlog.info(f"已删除空文件: {full_path}")
-                          except Exception as e:
-                              cloudlog.error(f"删除空文件失败: {str(e)}")
-                  return
+        # 2. 收集文件列表并计算当前占用 (使用 os.scandir 优化性能)
+        files = []
+        current_used_space = 0
+        try:
+          with os.scandir(self.video_dir) as entries:
+            for entry in entries:
+              if not entry.is_file():
+                continue
+              
+              try:
+                # entry.stat() 在 Linux 上通常会被缓存，比 os.stat(path) 更快
+                f_stat = entry.stat()
+              except OSError:
+                continue
 
-              # 如果需要清理，获取文件列表并按修改时间排序
-              files = []
-              for f in os.listdir(self.video_dir):
-                  full_path = os.path.join(self.video_dir, f)
-                  if not os.path.isfile(full_path):
-                      continue
-                  try:
-                      stat = os.stat(full_path)
-                      if stat.st_size == 0:
-                          # 清理空文件
-                          os.remove(full_path)
-                          cloudlog.info(f"已删除空文件: {full_path}")
-                          continue
-                      files.append((full_path, stat.st_mtime, stat.st_size))
-                  except Exception:
-                      continue
+              full_path = entry.path
 
-              if files:
-                  files.sort(key=lambda x: x[1]) # 按修改时间排序，最早的在前
+              # 顺便清理 0 字节文件
+              if f_stat.st_size == 0:
+                try:
+                  os.remove(full_path)
+                  cloudlog.info(f"已删除空文件: {full_path}")
+                except OSError:
+                  pass
+                continue
+              
+              files.append((full_path, f_stat.st_mtime, f_stat.st_size))
+              current_used_space += f_stat.st_size
+        except OSError as e:
+           cloudlog.error(f"扫描文件列表出错: {str(e)}")
+           return
 
-                  # 确定需要释放多少空间
-                  # 目标是达到预留空间阈值 或 已用空间小于保留时长限制
-                  target_used_space = min(
-                      (100.0 - self.DASHCAM_FREESPACE_LIMIT) / 100.0 * self._get_total_space(), # 达到空间阈值所需的已用空间
-                      self.DASHCAM_KEPT_MIN_SIZE # 满足保留时长所需的最小已用空间
-                  )
-                  current_used_space = self._get_used_space()
-                  space_to_free = max(0, current_used_space - target_used_space)
+        # 3. 计算需要释放的空间
+        
+        # A. 剩余空间策略 (Free Space Policy)
+        # 目标: 保持磁盘剩余空间 > DASHCAM_FREESPACE_LIMIT (例如 10%)
+        # 这个逻辑优先于保留时长，确保系统不爆满
+        target_free_bytes = (self.DASHCAM_FREESPACE_LIMIT / 100.0) * total_bytes
+        bytes_to_free_for_space = max(0, target_free_bytes - available_bytes)
 
-                  space_freed = 0
-                  for file_info in files:
-                      if space_freed >= space_to_free and self._get_used_space() <= target_used_space:
-                           break # 已经释放了足够的空间，或者已用空间已低于目标
-                      try:
-                          os.remove(file_info[0])
-                          space_freed += file_info[2]
-                          cloudlog.info(f"已删除旧文件: {file_info[0]}")
-                      except Exception as e:
-                          cloudlog.error(f"删除文件失败: {str(e)}")
-                          # 如果删除失败，可能需要跳过这个文件或者记录错误
-                          continue
+        # B. 占用上限/保留时长策略 (Size/Time Policy)
+        # 目标: Dashcam 文件夹总大小 < DASHCAM_KEPT_MIN_SIZE
+        bytes_to_free_for_limit = max(0, current_used_space - self.DASHCAM_KEPT_MIN_SIZE)
 
-              # 无论是否执行了删除旧文件，只要尝试了清理，就更新时间戳
-              self.last_clean_time = current_time
+        # 取两者最大值作为清理目标
+        total_bytes_to_free = max(bytes_to_free_for_space, bytes_to_free_for_limit)
 
-          except Exception as e:
-              cloudlog.error(f"清理空间出错: {str(e)}")
+        current_time = time.time()
+        
+        # 只有在确实需要清理，或者距离上次清理很久了(虽然这里每次都扫描了)，更新一下时间戳
+        # 这里的 CLEAN_INTERVAL 主要是给 systemd 这种外部调用做参考，但这里既然已经进来了，就执行逻辑
+        if total_bytes_to_free > 0 or (current_time - self.last_clean_time > self.CLEAN_INTERVAL):
+             self.last_clean_time = current_time
+
+        if total_bytes_to_free > 0:
+          # 按修改时间排序 (最早的在前)
+          files.sort(key=lambda x: x[1])
+          
+          freed_bytes = 0
+          for full_path, mtime, size in files:
+            if freed_bytes >= total_bytes_to_free:
+              break
+            
+            try:
+              os.remove(full_path)
+              freed_bytes += size
+              # 更新 current_used_space 以便日志记录 (可选)
+              current_used_space -= size
+              cloudlog.info(f"已删除旧文件: {os.path.basename(full_path)} (释放: {size/1e6:.1f}MB, 剩余需释放: {(total_bytes_to_free - freed_bytes)/1e6:.1f}MB)")
+            except OSError as e:
+              cloudlog.error(f"删除文件失败: {str(e)}")
+
+      except Exception as e:
+        cloudlog.error(f"清理空间出错: {str(e)}")
 
   def _get_used_space(self):
-    """获取已使用的空间大小"""
+    """获取已使用的空间大小 (使用 scandir 优化)"""
     try:
-      return sum(
-        os.path.getsize(os.path.join(self.video_dir, f))  # 改为self.video_dir
-        for f in os.listdir(self.video_dir)  # 改为self.video_dir
-        if os.path.isfile(os.path.join(self.video_dir, f))  # 改为self.video_dir
-      )
+      total_size = 0
+      with os.scandir(self.video_dir) as entries:
+        for entry in entries:
+          if entry.is_file():
+            try:
+              total_size += entry.stat().st_size
+            except OSError:
+              pass
+      return total_size
     except Exception as e:
       cloudlog.error(f"计算空间使用出错: {str(e)}")
       return 0

@@ -32,6 +32,9 @@
                             <a href="/download/gpx_logs/{{ row.name }}" class="btn btn-sm btn-outline-success">
                                 下载
                             </a>
+                            <a href="/delete/gpx_logs/{{ row.name }}" class="btn btn-sm btn-outline-danger ml-2" onclick="return confirm('确定要删除这个GPS记录文件吗？');">
+                                删除
+                            </a>
                         </td>
                     </tr>
                 {% endfor %}

@@ -2,6 +2,8 @@ import copy
 from cereal import car
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.numpy_fast import mean
+
+from openpilot.common.swaglog import cloudlog
 from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from openpilot.selfdrive.car.interfaces import CarStateBase
@@ -33,7 +35,9 @@ class CarState(CarStateBase):
     self.cruise_buttons = pt_cp.vl["ASCMSteeringButton"]["ACCButtons"]
     self.buttons_counter = pt_cp.vl["ASCMSteeringButton"]["RollingCounter"]
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
-    self.moving_backward = pt_cp.vl["EBCMWheelSpdRear"]["MovingBackward"] != 0
+    # This is to avoid a fault where you engage while still moving backwards after shifting to D.
+    # An Equinox has been seen with an unsupported status (3), so only check if either wheel is in reverse (2)
+    self.moving_backward = (pt_cp.vl["EBCMWheelSpdRear"]["RLWheelDir"] == 2) or (pt_cp.vl["EBCMWheelSpdRear"]["RRWheelDir"] == 2)
 
     # Variables used for avoiding LKAS faults
     self.loopback_lka_steering_cmd_updated = len(loopback_cp.vl_all["ASCMLKASteeringCmd"]["RollingCounter"]) > 0
@@ -86,6 +90,13 @@ class CarState(CarStateBase):
     self.lkas_status = pt_cp.vl["PSCMStatus"]["LKATorqueDeliveredStatus"]
     ret.steerFaultTemporary = self.lkas_status == 2
     ret.steerFaultPermanent = self.lkas_status == 3
+
+    if self.lkas_status != getattr(self, '_prev_lkas_status', -1):
+      if ret.steerFaultPermanent:
+        cloudlog.error(f"GM EPS Fault: State changed to {self.lkas_status} (Permanent - Failed)")
+      elif ret.steerFaultTemporary:
+        cloudlog.warning(f"GM EPS Fault: State changed to {self.lkas_status} (Temporary - Limited)")
+      self._prev_lkas_status = self.lkas_status
 
     # 1 - open, 0 - closed
     ret.doorOpen = (pt_cp.vl["BCMDoorBeltStatus"]["FrontLeftDoor"] == 1 or

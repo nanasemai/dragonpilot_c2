@@ -6,7 +6,7 @@ from openpilot.selfdrive.car.toyota import toyotacan
 from openpilot.selfdrive.car.toyota.values import CAR, STATIC_DSU_MSGS, NO_STOP_TIMER_CAR, TSS2_CAR, \
                                         MIN_ACC_SPEED, PEDAL_TRANSITION, CarControllerParams, ToyotaFlags, \
                                         UNSUPPORTED_DSU_CAR
-from common.realtime import DT_CTRL
+from openpilot.common.realtime import DT_CTRL
 from opendbc.can.packer import CANPacker
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.params import Params
@@ -86,6 +86,7 @@ class CarController:
     self.distance_button = 0
     self.prohibit_neg_calculation = True
     self.gas = 0
+    self.steer_saturation_counter = 0  # 饱和计数器
     self.accel = 0
     # 添加加速度控制相关变量
     self.prev_accel = 0
@@ -99,11 +100,21 @@ class CarController:
     self.dp_toyota_auto_unlock = p.get_bool("dp_toyota_auto_unlock")
     self.dp_toyota_sng = p.get_bool("dp_toyota_sng")
 
+    # 转向安全余量参数初始化
+    steer_rate_safety_margin_str = p.get("dp_toyota_steer_rate_safety_margin", encoding="utf8")
+    try:
+      self.steer_rate_safety_margin = int(steer_rate_safety_margin_str) if steer_rate_safety_margin_str is not None else 10
+      self.steer_rate_safety_margin = max(10, min(200, self.steer_rate_safety_margin))  # 限制在10-200范围内
+    except (ValueError, TypeError):
+      self.steer_rate_safety_margin = 10  # 默认安全余量
+
     # 盲点监测相关初始化
     self.dp_toyota_enhanced_bsm = p.get_bool("dp_toyota_enhanced_bsm")
     self._blindspot_debug_enabled_left = False
     self._blindspot_debug_enabled_right = False
-    self._blindspot_frame = 0
+    # 为左右两侧设置独立计时器，避免信号冲突
+    self._blindspot_frame_left = 0
+    self._blindspot_frame_right = 0
 
     # TSS2相关配置
     if self.CP.carFingerprint in TSS2_CAR: # tss2 can do higher hz then tss1 and can be on at all speed/standstill
@@ -115,14 +126,23 @@ class CarController:
     self._last_bsm_poll_left = 0
     self._last_bsm_poll_right = 0
     self._bsm_poll_interval = 1.0 / self._blindspot_rate  # 转换为秒
+    self.last_update_nanos = 0
+    self._jitter_issue_logged = False
 
 
   def update(self, CC, CS, now_nanos):
-    actuators = CC.actuators
-    hud_control = CC.hudControl
-    pcm_cancel_cmd = CC.cruiseControl.cancel
-    lat_active = CC.latActive and abs(CS.out.steeringTorque) < MAX_USER_TORQUE
-    stopping = actuators.longControlState == LongCtrlState.stopping
+    # Jitter Monitoring
+    if self.last_update_nanos > 0:
+        dt_ms = (now_nanos - self.last_update_nanos) / 1e6
+        if dt_ms > 30: # Warning if > 30ms (3x the expected 10ms)
+            if not self._jitter_issue_logged:
+                cloudlog.warning(f"Toyota LKAS: Jitter Detected - dt: {dt_ms:.2f}ms")
+                self._jitter_issue_logged = True
+        else:
+            self._jitter_issue_logged = False
+    self.last_update_nanos = now_nanos
+    pcm_cancel_cmd = 0
+    stopping = CC.actuators.longControlState == LongCtrlState.stopping
 
     # *** control msgs ***
     can_sends = []
@@ -133,20 +153,25 @@ class CarController:
     # 处理盲点监测
     self._handle_blindspot_monitoring(CS, can_sends)
 
-    # *** steer torque 转向扭矩 ***
-    if abs(CS.out.steeringRateDeg) > MAX_STEER_RATE + 5:  # 添加安全余量
+    # *** steer torque ***
+    # 非横向激活状态下禁用转向
+    if not CC.latActive:
       apply_steer = 0
       apply_steer_req = False
     else:
-      new_steer = int(round(actuators.steer * self.params.STEER_MAX))
-      apply_steer = apply_meas_steer_torque_limits(new_steer, self.last_steer, CS.out.steeringTorqueEps, self.params)
+      # 转向率安全检查 (使用参数化的安全余量)
+      if abs(CS.out.steeringRateDeg) > MAX_STEER_RATE + self.steer_rate_safety_margin:
+        apply_steer = 0
+        apply_steer_req = False
+        #cloudlog.warning(f"Toyota LKAS: Steer Rate Limit Exceeded: {CS.out.steeringRateDeg:.1f} deg/s (Margin: {self.steer_rate_safety_margin})")
+      else:
+        # 计算转向扭矩并应用限制
+        new_steer = int(round(CC.actuators.steer * self.params.STEER_MAX))
+        apply_steer = apply_meas_steer_torque_limits(new_steer, self.last_steer, CS.out.steeringTorqueEps, self.params)
 
-    # >100 degree/sec steering fault prevention >100度/秒转向故障预防
+    # 调用故障预防函数
     self.steer_rate_counter, apply_steer_req = common_fault_avoidance(abs(CS.out.steeringRateDeg) >= MAX_STEER_RATE, CC.latActive,
                                                                       self.steer_rate_counter, MAX_STEER_RATE_FRAMES)
-
-    if not CC.latActive:
-      apply_steer = 0
 
     # *** steer angle 转向角度 ***
     if self.CP.steerControlType == SteerControlType.angle:
@@ -154,18 +179,30 @@ class CarController:
       # 如果使用LTA控制，禁用LKA并设置转向角命令
       apply_steer = 0
       apply_steer_req = False
+      # 初始化apply_angle以避免未定义错误
+      apply_angle = CS.out.steeringAngleDeg + CS.out.steeringAngleOffsetDeg
       if self.frame % 2 == 0:
         # EPS uses the torque sensor angle to control with, offset to compensate
         # EPS使用扭矩传感器角度进行控制，偏移进行补偿
-        apply_angle = actuators.steeringAngleDeg + CS.out.steeringAngleOffsetDeg
+        apply_angle = CC.actuators.steeringAngleDeg + CS.out.steeringAngleOffsetDeg
 
         # Angular rate limit based on speed 基于速度的角速度限制
         apply_angle = apply_std_steer_angle_limits(apply_angle, self.last_angle, CS.out.vEgoRaw, self.params)
 
-        if not lat_active:
+        # LTA转向响应优化
+        #lta_active = CC.latActive and self.CP.steerControlType == SteerControlType.angle
+        #if lta_active and self.CP.carFingerprint in TSS2_CAR:
+          # 根据车速动态调整转向响应
+          # 根据车速动态调整转向响应（steer_rate_limit 当前未使用，保留供后续优化）
+          # steer_rate_limit = interp(CS.out.vEgo, [0, 10, 20], [100, 50, 25])
+          # 注意：移除了直接乘以steer_rate_scale的逻辑，因为apply_std_steer_angle_limits已经处理了角度变化率限制
+          # 避免了直接修改目标角度导致的蛇形摆动问题
+
+        if not CC.latActive:
           apply_angle = CS.out.steeringAngleDeg + CS.out.steeringAngleOffsetDeg
 
-        self.last_angle = clip(apply_angle, -MAX_LTA_ANGLE, MAX_LTA_ANGLE)
+      # 确保在所有分支下都能安全使用apply_angle
+      self.last_angle = clip(apply_angle, -MAX_LTA_ANGLE, MAX_LTA_ANGLE)
 
     self.last_steer = apply_steer
 
@@ -179,24 +216,16 @@ class CarController:
     # STEERING_LTA does not seem to allow more rate by sending faster, and may wind up easier
     # STEERING_LTA似乎不允许通过更快的发送来获得更高的速率，最终可能会更容易
     if self.frame % 2 == 0 and self.CP.carFingerprint in TSS2_CAR:
-      lta_active = lat_active and self.CP.steerControlType == SteerControlType.angle
+      lta_active = CC.latActive and self.CP.steerControlType == SteerControlType.angle
 
-      # 改进的转向响应优化
+      # 优化的扭矩渐变控制
       if lta_active:
-        # 根据车速动态调整转向响应
-        steer_rate_limit = interp(CS.out.vEgo, [0, 10, 20], [100, 50, 25])
-        # 添加转向角速度限制
-        max_steer_rate = clip(abs(CS.out.steeringRateDeg), 0, MAX_STEER_RATE)
-        steer_rate_scale = interp(max_steer_rate, [0, MAX_STEER_RATE], [1.0, 0.5])
-        apply_angle = clip(self.last_angle * steer_rate_scale, -steer_rate_limit, steer_rate_limit)
-        
-        # 优化的扭矩渐变控制
         full_torque_condition = (abs(CS.out.steeringTorqueEps) < self.params.STEER_MAX * 0.9 and  # 降低阈值到90%
                                abs(CS.out.steeringTorque) < MAX_LTA_DRIVER_TORQUE_ALLOWANCE * 0.9)
-        
+
         # 更平滑的扭矩渐变
         torque_wind_down = 100 if full_torque_condition else \
-                          interp(abs(CS.out.steeringTorqueEps), 
+                          interp(abs(CS.out.steeringTorqueEps),
                                 [self.params.STEER_MAX * 0.6,  # 提前开始渐变
                                  self.params.STEER_MAX * 0.9], # 降低最大阈值
                                 [100, 0])
@@ -204,7 +233,7 @@ class CarController:
         apply_angle = CS.out.steeringAngleDeg
         torque_wind_down = 0
       can_sends.append(toyotacan.create_lta_steer_command(self.packer, self.CP.steerControlType,
-                                                         apply_angle, lta_active,
+                                                         self.last_angle, lta_active,
                                                          self.frame // 2, torque_wind_down))
     # *** gas and brake ***
     if self.CP.enableGasInterceptor and CC.longActive:
@@ -218,7 +247,7 @@ class CarController:
         PEDAL_SCALE = interp(CS.out.vEgo, [0.0, MIN_ACC_SPEED, MIN_ACC_SPEED + PEDAL_TRANSITION], [0.4, 0.5, 0.0])
       # offset for creep and windbrake
       pedal_offset = interp(CS.out.vEgo, [0.0, 2.3, MIN_ACC_SPEED + PEDAL_TRANSITION], [-.4, 0.0, 0.2])
-      pedal_command = PEDAL_SCALE * (actuators.accel + pedal_offset)
+      pedal_command = PEDAL_SCALE * (CC.actuators.accel + pedal_offset)
       interceptor_gas_cmd = clip(pedal_command, 0., MAX_INTERCEPTOR_GAS)
     else:
       interceptor_gas_cmd = 0.
@@ -229,26 +258,6 @@ class CarController:
       self.prohibit_neg_calculation = True
     comp_thresh = interp(CS.out.vEgo, COMPENSATORY_CALCULATION_THRESHOLD_BP, COMPENSATORY_CALCULATION_THRESHOLD_V)
 
-    # 添加加速度控制逻辑
-    if self.CP.openpilotLongitudinalControl:
-      if self.frame % 3 == 0:
-        # 加速度命令限制
-        pcm_accel_cmd = actuators.accel
-        if CC.longActive:
-          # 内部PCM油门命令可能会在负加速度解除时卡住，所以我们应用一个宽松的速率限制
-          pcm_accel_cmd = clip(
-            pcm_accel_cmd - self.prev_accel,
-            ACCEL_WINDDOWN_LIMIT,
-            ACCEL_WINDUP_LIMIT
-          ) + self.prev_accel
-        self.prev_accel = pcm_accel_cmd
-
-        # 制动许可逻辑改进
-        if pcm_accel_cmd < 0.2 or stopping or not CC.longActive:
-          self.permit_braking = True
-        elif pcm_accel_cmd > 0.3:
-          self.permit_braking = False
-
     # don't reset until a reasonable compensatory value is reached
     # 在达到合理的补偿值之前，不要重置
     if CS.pcm_neutral_force > comp_thresh * self.CP.mass:
@@ -256,7 +265,7 @@ class CarController:
     # NO_STOP_TIMER_CAR will creep if compensation is applied when stopping or stopped, don't compensate when stopped or stopping
     # 如果在停止或停止时应用补偿，NO_STOP_TIMER_CAR将爬行，停止或停止后不进行补偿
     should_compensate = True
-    if (self.CP.carFingerprint in NO_STOP_TIMER_CAR and actuators.accel < 1e-3 or stopping) or CS.out.vEgo < 1e-3:
+    if (self.CP.carFingerprint in NO_STOP_TIMER_CAR and CC.actuators.accel < 1e-3 or stopping) or CS.out.vEgo < 1e-3:
       should_compensate = False
     # limit minimum to only positive until first positive is reached after engagement, don't calculate when long isn't active
     if CC.longActive and should_compensate and not self.prohibit_neg_calculation:
@@ -265,9 +274,30 @@ class CarController:
       accel_offset = 0.
     # only calculate pcm_accel_cmd when long is active to prevent disengagement from accelerator depression
     if CC.longActive:
-      pcm_accel_cmd = clip(actuators.accel + accel_offset, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
+      # 1. 先计算补偿
+      pcm_accel_cmd = CC.actuators.accel + accel_offset
+      # 2. 应用范围限制
+      pcm_accel_cmd = clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
+      # 3. 应用速率限制（如果需要）
+      if self.CP.openpilotLongitudinalControl:
+        pcm_accel_cmd = clip(
+          pcm_accel_cmd - self.prev_accel,
+          ACCEL_WINDDOWN_LIMIT,
+          ACCEL_WINDUP_LIMIT
+        ) + self.prev_accel
+      # 统一更新prev_accel
+      self.prev_accel = pcm_accel_cmd
     else:
       pcm_accel_cmd = 0.
+      self.prev_accel = 0.
+
+    # 制动许可逻辑改进
+    if self.CP.openpilotLongitudinalControl:
+      if self.frame % 3 == 0:
+        if pcm_accel_cmd < 0.2 or stopping or not CC.longActive:
+          self.permit_braking = True
+        elif pcm_accel_cmd > 0.3:
+          self.permit_braking = False
 
     # TODO: probably can delete this. CS.pcm_acc_status uses a different signal
     # than CS.cruiseState.enabled. confirm they're not meaningfully different
@@ -286,6 +316,7 @@ class CarController:
     self.last_standstill = CS.out.standstill
 
     # handle UI messages
+    hud_control = CC.hudControl
     fcw_alert = hud_control.visualAlert == VisualAlert.fcw
     steer_alert = hud_control.visualAlert in (VisualAlert.steerRequired, VisualAlert.ldw)
 
@@ -303,7 +334,7 @@ class CarController:
       # dp - for pcm compensation
       # when stopping, send -2.5 raw acceleration immediately to prevent vehicle from creeping, else send actuators.accel
       # 停车时，立即发送-2.5的原始加速度，以防止车辆爬行，否则发送执行器
-      accel_raw = -2.5 if stopping else actuators.accel
+      accel_raw = -2.5 if stopping else CC.actuators.accel
 
       # Lexus IS uses a different cancellation message
       if pcm_cancel_cmd and self.CP.carFingerprint in UNSUPPORTED_DSU_CAR:
@@ -313,7 +344,7 @@ class CarController:
 														 pcm_accel_cmd,
 														 accel_raw,
 														 pcm_cancel_cmd,
-                             self.standstill_req,
+                                                        self.standstill_req,
 														 lead,
 														 CS.acc_type,
 														 fcw_alert,
@@ -369,7 +400,7 @@ class CarController:
     if self.frame % 20 == 0 and self.CP.flags & ToyotaFlags.DISABLE_RADAR.value:
       can_sends.append([0x750, 0, b"\x0F\x02\x3E\x00\x00\x00\x00\x00", 0])
 
-    new_actuators = actuators.copy()
+    new_actuators = CC.actuators.copy()
     new_actuators.steer = apply_steer / self.params.STEER_MAX
     new_actuators.steerOutputCan = apply_steer
     new_actuators.steeringAngleDeg = self.last_angle
@@ -393,7 +424,7 @@ class CarController:
             can_sends.append(make_can_msg(0x750, LOCK_CMD, 0))
             self.dp_toyota_auto_lock_once = True
         self.dp_toyota_auto_lock_gear_prev = gear
-    except Exception as e:
+    except Exception:
       cloudlog.exception("Error in door lock control")
       self.dp_toyota_auto_lock_once = False
 
@@ -408,13 +439,13 @@ class CarController:
         can_sends.append(set_blindspot_debug_mode(LEFT_BLINDSPOT, True))
         self._blindspot_debug_enabled_left = True
     else:
-      if not self._blindspot_always_on and not CS.out.leftBlinker and self.frame - self._blindspot_frame > 50:
+      if not self._blindspot_always_on and not CS.out.leftBlinker and self.frame - self._blindspot_frame_left > 50:
         can_sends.append(set_blindspot_debug_mode(LEFT_BLINDSPOT, False))
         self._blindspot_debug_enabled_left = False
       if self.frame % self._blindspot_rate == 0:
         can_sends.append(poll_blindspot_status(LEFT_BLINDSPOT))
         if CS.out.leftBlinker:
-          self._blindspot_frame = self.frame
+          self._blindspot_frame_left = self.frame
 
     # 处理右侧BSM
     if not self._blindspot_debug_enabled_right:
@@ -422,10 +453,10 @@ class CarController:
         can_sends.append(set_blindspot_debug_mode(RIGHT_BLINDSPOT, True))
         self._blindspot_debug_enabled_right = True
     else:
-      if not self._blindspot_always_on and not CS.out.rightBlinker and self.frame - self._blindspot_frame > 50:
+      if not self._blindspot_always_on and not CS.out.rightBlinker and self.frame - self._blindspot_frame_right > 50:
         can_sends.append(set_blindspot_debug_mode(RIGHT_BLINDSPOT, False))
         self._blindspot_debug_enabled_right = False
-      if self.frame % self._blindspot_rate == self._blindspot_rate/2:
+      if self.frame % self._blindspot_rate == self._blindspot_rate // 2:
         can_sends.append(poll_blindspot_status(RIGHT_BLINDSPOT))
         if CS.out.rightBlinker:
-          self._blindspot_frame = self.frame
+          self._blindspot_frame_right = self.frame

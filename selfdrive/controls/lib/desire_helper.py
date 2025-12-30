@@ -13,7 +13,7 @@ LaneChangeState = log.LateralPlan.LaneChangeState
 # - laneChangeFinishing: 换道完成状态
 LaneChangeDirection = log.LateralPlan.LaneChangeDirection
 
-# LANE_CHANGE_SPEED_MIN = 20 * CV.MPH_TO_MS
+LANE_CHANGE_SPEED_MIN = 20 * CV.MPH_TO_MS
 LANE_CHANGE_TIME_MAX = 10.
 
 DESIRES = {
@@ -49,20 +49,17 @@ class DesireHelper:
     self.desire = log.LateralPlan.Desire.none
     # dp
     self.param_s = Params()
-    self._dp_lateral_road_edge_detected = False
-    self._dp_lat_lane_change_assist_speed = 0
-    # 添加安全检查控制参数
-    self._dp_lat_lane_change_abort_check = False
+    # 在初始化时获取参数，避免每帧读取
+    self._dp_lateral_road_edge_detected = self.param_s.get_bool("dp_lateral_road_edge_detected")
+    speed_str = self.param_s.get("dp_lat_lane_change_assist_speed", encoding="utf8")
+    self._dp_lat_lane_change_assist_speed = int(speed_str) * CV.KPH_TO_MS if speed_str else 0
+    self._dp_lat_lane_change_abort_check = self.param_s.get_bool("dp_lat_lane_change_abort_check")
 
   def update(self, carstate, lateral_active, lane_change_prob,model_data=None):
 
-    self._dp_lateral_road_edge_detected = self.param_s.get_bool("dp_lateral_road_edge_detected")
-    self._dp_lat_lane_change_assist_speed = int(self.param_s.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.KPH_TO_MS
-    self._dp_lat_lane_change_abort_check = self.param_s.get_bool("dp_lat_lane_change_abort_check")
-
     v_ego = carstate.vEgo
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
-    below_lane_change_speed = v_ego < self._dp_lat_lane_change_assist_speed if self._dp_lat_lane_change_assist_speed > 0 else True
+    below_lane_change_speed = v_ego < self._dp_lat_lane_change_assist_speed if self._dp_lat_lane_change_assist_speed > 0 else False
 
     if not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX:
       self.lane_change_state = LaneChangeState.off
@@ -90,7 +87,7 @@ class DesireHelper:
         # 初始化 road_edge_detected 变量为 False
         road_edge_detected = False
         # dp road detected
-        if self._dp_lateral_road_edge_detected:
+        if self._dp_lateral_road_edge_detected and model_data is not None:
           road_edge_detected = get_road_edge(carstate, model_data, self._dp_lateral_road_edge_detected)
 
         if not one_blinker or below_lane_change_speed:
@@ -165,5 +162,4 @@ class DesireHelper:
       self.keep_pulse_timer += DT_MDL
       if self.keep_pulse_timer > 1.0:
         self.keep_pulse_timer = 0.0
-      elif self.desire in (log.LateralPlan.Desire.keepLeft, log.LateralPlan.Desire.keepRight):
-        self.desire = log.LateralPlan.Desire.none
+      

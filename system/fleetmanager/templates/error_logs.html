@@ -8,6 +8,14 @@
     <br>
     <h1>错误日志</h1>
     <br>
+    <div class="mb-4">
+        <a href="/delete_all_error_logs" class="btn btn-danger" onclick="return confirm('确定要删除所有错误日志吗？此操作不可恢复！');">
+            删除所有错误日志
+        </a>
+        <a href="/package_error_logs" class="btn btn-primary ml-2" onclick="return confirm('确定要将所有错误日志打包成压缩包吗？');">
+            打包所有日志
+        </a>
+    </div>
     <div class="table-responsive">
         <table class="table table-hover">
             <thead class="table-light">
@@ -31,6 +39,9 @@
                         <td>
                             <a href="/download/error_logs/{{ row.name }}" class="btn btn-sm btn-outline-success">
                                 下载
+                            </a>
+                            <a href="/delete/error_logs/{{ row.name }}" class="btn btn-sm btn-outline-danger ml-2" onclick="return confirm('确定要删除这个日志文件吗？');">
+                                删除
                             </a>
                         </td>
                     </tr>

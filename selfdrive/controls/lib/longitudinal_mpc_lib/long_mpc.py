@@ -78,35 +78,30 @@ def get_T_FOLLOW(personality=log.LongitudinalPersonality.standard):
     raise NotImplementedError("Longitudinal personality not supported")
 
 def get_dynamic_follow(v_ego, personality=log.LongitudinalPersonality.standard, curvature=0.0, rel_speed=0.0):
-  # 添加对v_ego的边界检查
+  # 优化的动态跟车时距计算，保留原始核心逻辑但适当简化
   v_ego = max(0.0, min(v_ego, 40.0))  # 限制v_ego在0-40 m/s之间
+  # 根据驾驶风格设置基础时距（保留原始的关键速度点）
   if personality==log.LongitudinalPersonality.relaxed:
     # 调整速度区间使过渡更平滑
     x_vel =  [0.0,  3.0,  8.0,  13.90,  20,    25,    40]  # m/s
     y_dist = [1.0,  1.05, 1.15,  1.25,   1.35,  1.55,  1.7] # 秒
   elif personality==log.LongitudinalPersonality.standard:
-    # 调整速度区间使过渡更平滑
+    # 调整速度区间使过渡更平滑，增加基础跟车时距
     x_vel =  [0.0,  3.0,  8.0,  13.90,  20,    25,    40]  # m/s
-    y_dist = [0.85, 0.90, 0.95,  1.05,   1.15,  1.25,  1.3] # 秒
+    y_dist = [0.95, 1.00, 1.05,  1.15,   1.25,  1.35,  1.4] # 秒  # 增加了基础跟车时距
   elif personality==log.LongitudinalPersonality.aggressive:
     # 调整速度区间使过渡更平滑
     x_vel =  [0.0,  4.00, 8.0,  13.89,  20,    25,    40]  # m/s
     y_dist = [0.65, 0.70, 0.75,  0.80,   0.85,  0.95,  1.0] # 秒
   else:
     raise NotImplementedError("Dynamic Follow personality not supported")
-  # 基础跟车时距
   base_t_follow = np.interp(v_ego, x_vel, y_dist)
-  # 道路曲率因素：弯道增加跟车距离
-  curve_factor = np.clip(1.0 + abs(curvature) * 50.0, 1.0, 1.3)
-  # 相对速度因素：
-  # - 如果前车减速(rel_speed < 0)，增加跟车距离
-  # - 如果前车加速(rel_speed > 0)，适当减少跟车距离
-  rel_speed_factor = np.clip(1.0 - rel_speed * 0.15, 0.85, 1.25)
-  # 天气因素(可选，这里默认为正常天气)
-  weather_factor = 1.0
-  # 综合计算最终跟车时距
-  final_t_follow = base_t_follow * curve_factor * rel_speed_factor * weather_factor
-  return np.clip(final_t_follow, 0.5, 2.5)  # 确保时距在安全范围内
+
+  # 保留重要的曲率和相对速度影响
+  curve_factor = np.clip(1.0 + abs(curvature) * 30.0, 1.0, 1.3)
+  rel_speed_factor = np.clip(1.0 - rel_speed * 0.12, 0.88, 1.15)
+  final_t_follow = base_t_follow * curve_factor * rel_speed_factor
+  return np.clip(final_t_follow, 0.5, 2.5)
 
 def get_stopped_equivalence_factor(v_lead):
   return (v_lead**2) / (2 * COMFORT_BRAKE)
@@ -119,36 +114,27 @@ def get_safe_obstacle_distance(v_ego, t_follow):
 def desired_follow_distance(v_ego, v_lead, t_follow=get_T_FOLLOW()):
   return get_safe_obstacle_distance(v_ego, t_follow) - get_stopped_equivalence_factor(v_lead)
 
+
 def get_stopped_equivalence_factor_krkeegen(v_lead, v_ego):
     """优化的停车等效距离计算
     考虑相对速度和当前速度的动态影响
     """
     v_diff = v_lead - v_ego
     v_diff_offset = 0
-
     if np.all(v_diff > 0):
-        # 动态速度因子：高速时更保守，低速时更积极
-        speed_factor = np.clip(1.0 - (v_ego / 20.0), 0.2, 1.0)
-
-        # 相对速度影响：速度差越大，反应越积极
-        rel_speed_factor = np.clip(v_diff / 5.0, 0.0, 1.0)
-
-        # 计算偏移量
-        v_diff_offset = v_diff * speed_factor * rel_speed_factor
-
-        # 根据当前速度动态调整最大偏移量
-        max_offset = STOP_DISTANCE * (0.7 - v_ego * 0.02)  # 速度越高，允许的偏移量越小
-        v_diff_offset = np.clip(v_diff_offset, 0, max_offset)
-
-        # 平滑加速响应
-        v_diff_offset = np.maximum(v_diff_offset * ((10 - v_ego)/10), 0)
-
+      # 动态速度因子：高速时更保守，低速时更积极
+      speed_factor = np.clip(1.0 - (v_ego / 20.0), 0.2, 1.0)
+      # 相对速度影响：速度差越大，反应越积极
+      rel_speed_factor = np.clip(v_diff / 5.0, 0.0, 1.0)
+      # 计算偏移量
+      v_diff_offset = v_diff * speed_factor * rel_speed_factor
+      # 根据当前速度动态调整最大偏移量
+      max_offset = STOP_DISTANCE * (0.7 - v_ego * 0.02)  # 速度越高，允许的偏移量越小
+      v_diff_offset = np.clip(v_diff_offset, 0, max_offset)
     # 基础制动距离
-    base_distance = (v_lead**2) / (2 * COMFORT_BRAKE)
-
+    base_distance = (v_lead ** 2) / (2 * COMFORT_BRAKE)
     # 高速安全裕度
     safety_margin = np.clip(v_ego * 0.1, 0.0, 2.0)
-
     return base_distance + v_diff_offset + safety_margin
 
 def gen_long_model():

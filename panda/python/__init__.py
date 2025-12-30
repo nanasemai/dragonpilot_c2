@@ -388,7 +388,7 @@ class Panda:
     context.open()
     try:
       for device in context.getDeviceList(skip_on_error=True):
-        if device.getVendorID() == 0xbbaa and device.getProductID() in (0xddcc, 0xddee):
+        if device.getVendorID() in (0xbbaa, 0x3801) and device.getProductID() in (0xddcc, 0xddee):
           try:
             this_serial = device.getSerialNumber()
           except Exception:
@@ -435,7 +435,7 @@ class Panda:
     try:
       with usb1.USBContext() as context:
         for device in context.getDeviceList(skip_on_error=True):
-          if device.getVendorID() == 0xbbaa and device.getProductID() in (0xddcc, 0xddee):
+          if device.getVendorID() in (0xbbaa, 0x3801) and device.getProductID() in (0xddcc, 0xddee):
             try:
               serial = device.getSerialNumber()
               if len(serial) == 24:

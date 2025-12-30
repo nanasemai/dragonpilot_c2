@@ -141,46 +141,46 @@ function two_init {
         [ -f "$dev/governor" ] && echo "powersave" > "$dev/governor"
       done
       if [ -f /ONEPLUS ]; then
-        echo 902400 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+        [ -f /sys/class/devfreq/soc:qcom,m4m/max_freq ] && echo 902400 > /sys/class/devfreq/soc:qcom,m4m/max_freq 2>/dev/null
       else
-        echo 768000 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+        [ -f /sys/class/devfreq/soc:qcom,m4m/max_freq ] && echo 768000 > /sys/class/devfreq/soc:qcom,m4m/max_freq 2>/dev/null
       fi
-      echo "powersave" > /sys/class/devfreq/soc:qcom,m4m/governor
-      echo "powersave" > /sys/class/devfreq/soc:qcom,memlat-cpu0/governor
-      echo "powersave" > /sys/class/devfreq/soc:qcom,memlat-cpu2/governor
-      echo "powersave" > /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor
+      [ -f /sys/class/devfreq/soc:qcom,m4m/governor ] && echo "powersave" > /sys/class/devfreq/soc:qcom,m4m/governor 2>/dev/null
+      [ -f /sys/class/devfreq/soc:qcom,memlat-cpu0/governor ] && echo "powersave" > /sys/class/devfreq/soc:qcom,memlat-cpu0/governor 2>/dev/null
+      [ -f /sys/class/devfreq/soc:qcom,memlat-cpu2/governor ] && echo "powersave" > /sys/class/devfreq/soc:qcom,memlat-cpu2/governor 2>/dev/null
+      [ -f /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor ] && echo "powersave" > /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor 2>/dev/null
       ;;
     "2") # 性能模式
       for dev in /sys/class/devfreq/soc:qcom,*; do
         [ -f "$dev/governor" ] && echo "performance" > "$dev/governor"
       done
       if [ -f /ONEPLUS ]; then
-        echo 1593600 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+        [ -f /sys/class/devfreq/soc:qcom,m4m/max_freq ] && echo 1593600 > /sys/class/devfreq/soc:qcom,m4m/max_freq 2>/dev/null
         # 增加CPU频率设置
         echo 2016000 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
         echo 2016000 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
       else
-        echo 1190400 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+        [ -f /sys/class/devfreq/soc:qcom,m4m/max_freq ] && echo 1190400 > /sys/class/devfreq/soc:qcom,m4m/max_freq 2>/dev/null
       fi
-      echo "performance" > /sys/class/devfreq/soc:qcom,m4m/governor
-      echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu0/governor
-      echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu2/governor
-      echo "performance" > /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor
+      [ -f /sys/class/devfreq/soc:qcom,m4m/governor ] && echo "performance" > /sys/class/devfreq/soc:qcom,m4m/governor 2>/dev/null
+      [ -f /sys/class/devfreq/soc:qcom,memlat-cpu0/governor ] && echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu0/governor 2>/dev/null
+      [ -f /sys/class/devfreq/soc:qcom,memlat-cpu2/governor ] && echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu2/governor 2>/dev/null
+      [ -f /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor ] && echo "performance" > /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor 2>/dev/null
       ;;
     *) # 普通模式（默认）
-      echo "performance" > /sys/class/devfreq/soc:qcom,cpubw/governor
+      [ -f /sys/class/devfreq/soc:qcom,cpubw/governor ] && echo "performance" > /sys/class/devfreq/soc:qcom,cpubw/governor 2>/dev/null
       for dev in /sys/class/devfreq/soc:qcom,*; do
-        [ -f "$dev/governor" ] && echo "performance" > "$dev/governor"
+        [ -f "$dev/governor" ] && echo "performance" > "$dev/governor" 2>/dev/null
       done
       if [ -f /ONEPLUS ]; then
-        echo 1363200 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+        [ -f /sys/class/devfreq/soc:qcom,m4m/max_freq ] && echo 1363200 > /sys/class/devfreq/soc:qcom,m4m/max_freq 2>/dev/null
       else
-        echo 1056000 > /sys/class/devfreq/soc:qcom,m4m/max_freq
+        [ -f /sys/class/devfreq/soc:qcom,m4m/max_freq ] && echo 1056000 > /sys/class/devfreq/soc:qcom,m4m/max_freq 2>/dev/null
       fi
-      echo "performance" > /sys/class/devfreq/soc:qcom,m4m/governor
-      echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu0/governor
-      echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu2/governor
-      echo "performance" > /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor
+      [ -f /sys/class/devfreq/soc:qcom,m4m/governor ] && echo "performance" > /sys/class/devfreq/soc:qcom,m4m/governor 2>/dev/null
+      [ -f /sys/class/devfreq/soc:qcom,memlat-cpu0/governor ] && echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu0/governor 2>/dev/null
+      [ -f /sys/class/devfreq/soc:qcom,memlat-cpu2/governor ] && echo "performance" > /sys/class/devfreq/soc:qcom,memlat-cpu2/governor 2>/dev/null
+      [ -f /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor ] && echo "performance" > /sys/class/devfreq/b00000.qcom,kgsl-3d0/governor 2>/dev/null
       ;;
   esac
 
@@ -207,35 +207,35 @@ function two_init {
   case $device_mode in
     "0") # 节能模式
       # 限制最大 CPU 频率
-      echo 1401600 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
-      echo 1401600 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
-      # 设置温控阈值
+      [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq ] && echo 1401600 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null
+      [ -f /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq ] && echo 1401600 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq 2>/dev/null
+      # 设置温控阈值（如果有写入权限）
       for zone in /sys/class/thermal/thermal_zone*; do
-        if [ -f "$zone/trip_point_0_temp" ]; then
-          echo 85000 > "$zone/trip_point_0_temp" 2>/dev/null || true
-        fi
+        if [ -f "$zone/trip_point_0_temp" ] && [ -w "$zone/trip_point_0_temp" ]; then
+           echo 85000 > "$zone/trip_point_0_temp" 2>/dev/null || true
+          fi
       done
       ;;
     "2") # 性能模式
       # 提高最大 CPU 频率
-      echo 2016000 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
-      echo 2016000 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
-      # 设置温控阈值
+      [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq ] && echo 2016000 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null
+      [ -f /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq ] && echo 2016000 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq 2>/dev/null
+      # 设置温控阈值（如果有写入权限）
       for zone in /sys/class/thermal/thermal_zone*; do
-        if [ -f "$zone/trip_point_0_temp" ]; then
+        if [ -f "$zone/trip_point_0_temp" ] && [ -w "$zone/trip_point_0_temp" ]; then
           echo 85000 > "$zone/trip_point_0_temp" 2>/dev/null || true
         fi
       done
       ;;
     *) # 普通模式（默认）
       # 默认 CPU 频率
-      echo 1804800 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
-      echo 1804800 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
-      # 设置温控阈值
+      [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq ] && echo 1804800 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null
+      [ -f /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq ] && echo 1804800 > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq 2>/dev/null
+      # 设置温控阈值（如果有写入权限）
       for zone in /sys/class/thermal/thermal_zone*; do
-        if [ -f "$zone/trip_point_0_temp" ]; then
-          echo 85000 > "$zone/trip_point_0_temp" 2>/dev/null || true
-        fi
+        if [ -f "$zone/trip_point_0_temp" ] && [ -w "$zone/trip_point_0_temp" ]; then
+           echo 85000 > "$zone/trip_point_0_temp" 2>/dev/null || true
+          fi
       done
       ;;
   esac
@@ -349,6 +349,7 @@ function two_init {
     echo "Installing $MODULE..."
     tar -zxvf "$LIB_PATH/$MODULE.tar.gz" -C "$PY_LIB_DEST/"
   fi
+
   mount -o remount,r /system
 
   # osm server

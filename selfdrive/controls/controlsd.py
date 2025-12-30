@@ -122,17 +122,19 @@ class Controls:
     self.dp_device_disable_temp_check = self.params.get_bool("dp_device_disable_temp_check")
     self._dp_vag_timebomb_bypass_counter = 0
     self._dp_vag_timebomb_bypass = self.params.get_bool("dp_vag_timebomb_bypass")
-    self._dp_lat_lane_change_assist_disabled = int(self.params.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) == 0
+    _speed_str = self.params.get("dp_lat_lane_change_assist_speed", encoding="utf8")
+    self._dp_lat_lane_change_assist_disabled = int(_speed_str) == 0 if _speed_str else True
     self._dp_lat_lane_change_assist_disabled_active = False
     self._dp_long_missing_lead_warning = self.params.get_bool("dp_long_missing_lead_warning")
     self._dp_long_missing_lead_count = 0
     self._dp_long_missing_lead_prev = False
-    self._dp_lat_lane_change_assist_speed = int(self.params.get("dp_lat_lane_change_assist_speed", encoding="utf-8")) * CV.KPH_TO_MS
+    self._dp_lat_lane_change_assist_speed = int(_speed_str) * CV.KPH_TO_MS if _speed_str else 0
     self._dp_lateral_road_edge_detected = self.params.get_bool("dp_lateral_road_edge_detected")
     self._dp_road_edge_timer = 0.0  # 添加计时器变量
     # 添加ALKA力矩检查开关
-    self._dp_alka_torque_check = Params().get_bool("dp_alka_torque_check")
-    self.camera_offset = int(Params().get("dp_lateral_camera_offset", encoding="utf-8"))*0.01 #CAMERA_OFFSET
+    self._dp_alka_torque_check = self.params.get_bool("dp_alka_torque_check")
+    _camera_offset_str = self.params.get("dp_lateral_camera_offset", encoding="utf8")
+    self.camera_offset = int(_camera_offset_str) * 0.01 if _camera_offset_str else CAMERA_OFFSET
 
 
     self.sm = sm
@@ -143,7 +145,7 @@ class Controls:
       if NO_IR_CTRL:
         ignore += ['driverCameraState', 'driverMonitoringState']
       self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'liveCalibration',
-                                     'driverMonitoringState', 'longitudinalPlan', 'lateralPlan', 'liveLocationKalman',
+                                     'driverMonitoringState', 'longitudinalPlan', 'longitudinalPlanExt', 'lateralPlan', 'liveLocationKalman',
                                      'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters', 'testJoystick'] + self.camera_packets,
                                     ignore_alive=ignore, ignore_avg_freq=['radarState', 'testJoystick'])
 
@@ -538,6 +540,12 @@ class Controls:
     planner_fcw = self.sm['longitudinalPlan'].fcw and self.enabled
     if planner_fcw or model_fcw:
       self.events.add(EventName.fcw)
+
+    # Check for lead start alert
+    if self.sm.updated['longitudinalPlanExt']:
+      lead_start_alert = self.sm['longitudinalPlanExt'].leadStartAlert
+      if lead_start_alert:
+        self.events.add(EventName.leadStartAlert)
 
     for m in messaging.drain_sock(self.log_sock, wait_for_one=False):
       try:

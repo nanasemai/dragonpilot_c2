@@ -179,11 +179,11 @@ def get_nn_model_path(car, eps_firmware) -> Optional[str]:
     #cloudlog.info(f"NNFF: 使用车型名称匹配 - {check_model}")
 
   model_path, max_similarity = check_nn_path(check_model)
-  if car not in model_path or 0.0 <= max_similarity < 0.9:
+  if model_path is None or car not in model_path or 0.0 <= max_similarity < 0.9:
     cloudlog.warning(f"NNFF: 首次匹配失败，尝试仅使用车型名称 - {car}")
     check_model = car
     model_path, max_similarity = check_nn_path(check_model)
-    if car not in model_path or 0.0 <= max_similarity < 0.9:
+    if model_path is None or car not in model_path or 0.0 <= max_similarity < 0.9:
       cloudlog.error(f"NNFF: 模型匹配失败 - 车型: {car}")
       model_path = None
   else:
@@ -285,14 +285,15 @@ class CarInterfaceBase(ABC):
     ret = cls._get_params(ret, candidate, fingerprint, car_fw, experimental_long, docs)
 
     # rick - override lat controller
-    dp_lat_controller = int(Params().get("dp_lat_controller"))
+    dp_lat_controller_param = Params().get("dp_lat_controller")
+    dp_lat_controller = int(dp_lat_controller_param) if dp_lat_controller_param is not None else 0
     if dp_lat_controller == 1:  # indi
       cls.configure_indi_tune(ret.lateralTuning)
     elif dp_lat_controller == 2:  # lqr
       cls.configure_lqr_tune(ret.lateralTuning)
 
     # Enable torque controller for all cars that do not use angle based steering
-    if ret.steerControlType != car.CarParams.SteerControlType.angle and Params().get("dp_use_nnff"):
+    if ret.steerControlType != car.CarParams.SteerControlType.angle and Params().get_bool("dp_use_nnff"):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       eps_firmware = str(next((fw.fwVersion for fw in car_fw if fw.ecu == "eps"), ""))
       model = get_nn_model_path(candidate, eps_firmware)
@@ -332,7 +333,7 @@ class CarInterfaceBase(ABC):
   def torque_from_lateral_accel_linear(self, latcontrol_inputs: LatControlInputs,
                                        torque_params: car.CarParams.LateralTorqueTuning,
                                        lateral_accel_error: float, lateral_accel_deadzone: float,
-                                       friction_compensation: bool) -> float:
+                                       friction_compensation: bool, gravity_adjusted: bool) -> float:
     # The default is a linear relationship between torque and lateral acceleration (accounting for road roll and steering friction)
     friction = get_friction(lateral_accel_error, lateral_accel_deadzone, FRICTION_THRESHOLD, torque_params,
                             friction_compensation)
@@ -433,6 +434,15 @@ class CarInterfaceBase(ABC):
     ret.canValid = all(cp.can_valid for cp in self.can_parsers if cp is not None)
     ret.canTimeout = any(cp.bus_timeout for cp in self.can_parsers if cp is not None)
 
+    if ret.canTimeout:
+        # 检测哪些总线超时
+        timeout_buses = [i for i, cp in enumerate(self.can_parsers) if cp is not None and cp.bus_timeout]
+        if not getattr(self, '_can_timeout_logged', False):
+            cloudlog.error(f"CAN Timeout Detected on Buses: {timeout_buses}")
+            self._can_timeout_logged = True
+    else:
+        self._can_timeout_logged = False
+
     if ret.vEgoCluster == 0.0 and not self.v_ego_cluster_seen:
       ret.vEgoCluster = ret.vEgo
     else:
@@ -525,14 +535,13 @@ class CarInterfaceBase(ABC):
 
     # 永久性转向故障
     if cs_out.steerFaultPermanent:
-      cloudlog.error("永久性转向故障触发:",
-                      " 车速:", cs_out.vEgo * 3.6,  # 转换为km/h
-                      " EPS力矩:", cs_out.steeringTorqueEps,
-                      " 驾驶员力矩:", cs_out.steeringTorque - cs_out.steeringTorqueEps,
-                      " 总力矩:", cs_out.steeringTorque,
-                      " 方向盘角度:", cs_out.steeringAngleDeg,
-                      " 方向盘转速:", abs(cs_out.steeringRateDeg))
-      events.add(EventName.steerUnavailable)
+        cloudlog.error(f"永久性转向故障触发: 车速:{cs_out.vEgo * 3.6:.1f}km/h, "
+                       f"EPS力矩:{cs_out.steeringTorqueEps}, "
+                       f"驾驶员力矩:{cs_out.steeringTorque - cs_out.steeringTorqueEps}, "
+                       f"总力矩:{cs_out.steeringTorque}, "
+                       f"方向盘角度:{cs_out.steeringAngleDeg}, "
+                       f"方向盘转速:{abs(cs_out.steeringRateDeg)}")
+        events.add(EventName.steerUnavailable)
 
     # we engage when pcm is active (rising edge)
     # enabling can optionally be blocked by the car interface
