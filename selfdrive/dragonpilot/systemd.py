@@ -67,18 +67,13 @@ def dashcam_thread():
             dashcam.restart_recording()
           last_park_time = time.monotonic()  # 重置计时器
 
-      # 无条件获取和更新可用空间
+      # 更新可用空间
       if sm.updated['deviceState']:
-          new_free_space = sm['deviceState'].freeSpacePercent
-          # 只记录空闲空间显著变化
-          if free_space is None or abs(new_free_space - free_space) > 0.5:  # 变化超过0.5%才记录
-            cloudlog.info(f"系统空闲空间: {new_free_space}%")
-            free_space = new_free_space
-      
-      # 当空间不足时，直接调用清理方法进行紧急清理
-      if free_space is not None and free_space < 15.0:  # 当空间低于15%时立即清理
-          cloudlog.warning(f"警告：空间不足({free_space}%), 强制触发清理")
-          dashcam._clean_up_space()
+          free_space = sm['deviceState'].freeSpacePercent
+          # 只有当空间变化时才触发清理
+          dashcam.run(started=started, free_space=free_space)
+          if free_space < dashcam.DASHCAM_FREESPACE_LIMIT:
+              dashcam._clean_up_space()
 
       # 检查配置变更
       new_enabled = params.get_bool("dp_on_road_dashcam")

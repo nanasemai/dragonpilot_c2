@@ -102,7 +102,7 @@ def manager_init() -> None:
     # 行车记录仪相关参数
     ("dp_dashcam_quality", "1"),  # 视频质量：0=低 1=中 2=高
     ("dp_dashcam_duration", "120"),    # 单个视频时长（秒）
-    ("dp_dashcam_kept_hours", "30"),   # 视频保留时长（小时）
+    ("dp_dashcam_kept_hours", "20"),   # 视频保留时长（小时）
     ("dp_torqued_override", "0"),
     ("dp_torque_lat_accel_factor", "250"),#2.5
     ("dp_torque_friction", "220"),#0.22
@@ -130,8 +130,8 @@ def manager_init() -> None:
     ("dp_screenshotserver", "0"),
     # 添加前车起步提醒相关参数
     ("dp_lead_start_alert", "0"),  # 前车起步提醒功能开关，默认关闭
-    ("dp_lead_start_alert_threshold", "3"),  # 前车起步速度阈值(m/s)x0.1 默认0.3 m/s
-    ("dp_lead_stop_time_threshold", "30"),  # 前车停止时间阈值(s)x0.1 默认3.0秒
+    ("dp_lead_start_alert_threshold", "5"),  # 前车起步速度阈值(m/s)x0.1 默认0.5 m/s
+    ("dp_lead_stop_time_threshold", "50"),  # 前车停止时间阈值(s)x0.1 默认5.0秒
     # Panda性能监控参数
     ("dp_panda_monitoring", "0"),  # Panda性能监控功能开关，默认关闭
     # 控制性能监控参数

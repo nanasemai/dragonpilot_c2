@@ -130,12 +130,14 @@ class LongitudinalPlanner:
     self.dp_long_use_krkeegen_tune_active = False
     # 停车判定
     self.lead_start_alert = False  # 前车起步提醒标志
-    self.lead_stopped_time = float('inf')  # 前车停止时间，初始值设为无穷大避免误触发
-    self.lead_started = False      # 前车起步状态
+    self.lead_stopped_time = 0.0  # 前车停止时间，统一使用0.0
     self.lead_was_stopped = False  # 上一帧前车是否停止
-    self.lead_start_threshold = 0.3  # 默认0.3 m/s
-    self.lead_stop_threshold = 3.0   # 默认3.0秒
-    self.lead_start_alert_duration = 0  # 新增：提醒持续计数器
+    self.lead_start_threshold = 0.5  # 默认0.5 m/s (对应参数默认值5)
+    self.lead_stop_threshold = 5.0   # 默认5.0秒 (对应参数默认值50)
+    self.lead_start_alert_duration = 0  # 提醒持续计数器
+    self.last_lead_start_time = 0.0  # 上次前车起步提醒时间，用于去重
+    self.lead_min_dist_during_stop = 0.0  # 前车停止期间的最小距离记录
+    self.lead_started_time = 0.0     # 前车起步时间，用于状态转换缓冲
     self.desired_follow_distance = float('nan')  # 初始化为NaN表示无效值
 
   def read_param(self):
@@ -150,8 +152,8 @@ class LongitudinalPlanner:
     self.acm_downhill_param = self.params.get_bool('dp_lon_acm_downhill')
     # 读取前车起步提醒参数
     self.lead_start_enabled = self.params.get_bool('dp_lead_start_alert')
-    self.lead_start_threshold = float(self.params.get('dp_lead_start_alert_threshold', encoding='utf8') or "3") * 0.1
-    self.lead_stop_threshold = float(self.params.get('dp_lead_stop_time_threshold', encoding='utf8') or "30") * 0.1
+    self.lead_start_threshold = float(self.params.get('dp_lead_start_alert_threshold', encoding='utf8') or "5") * 0.1
+    self.lead_stop_threshold = float(self.params.get('dp_lead_stop_time_threshold', encoding='utf8') or "50") * 0.1
 
   def update(self, sm):
     """更新规划器状态和计算控制输出
@@ -280,49 +282,121 @@ class LongitudinalPlanner:
       self.output_a_target = np.clip(output_a_target, accel_clip[0], accel_clip[1])
       self.prev_accel_clip = accel_clip
 
-    # 改进的前车状态检测逻辑
-    if self.lead_start_enabled and sm['radarState'].leadOne.status:
-      lead = sm['radarState'].leadOne
-      current_time = sm.logMonoTime['radarState'] / 1e9
-      v_ego = sm['carState'].vEgo
-      # 综合判定前车停止状态 - 简化条件，提高可靠性
-      is_stopped = (lead.vLead < self.lead_start_threshold and lead.dRel < 30.0)
-      if is_stopped:
-        # 前车停止状态
+    # --------------------------------------------------------------------------------
+    # 场景优化：红绿灯起步提醒 (Traffic Light Start Alert)
+    # 核心策略：
+    # 1. 速度滞回：停止阈值(0.5m/s) < 起步阈值(1.0m/s)，防止临界值抖动。
+    # 2. 距离确认：不仅看速度，还要看前车是否真的"远离"了本车 (d_rel 增加)。
+    # 3. 状态机：明确的 [监测中] -> [已静止] -> [确认起步] 流程。
+    # --------------------------------------------------------------------------------
+
+    # --- A. 基础环境数据获取 ---
+    lead = sm['radarState'].leadOne
+    current_time = sm.logMonoTime['radarState'] / 1e9
+    v_ego = sm['carState'].vEgo
+    gear = sm['carState'].gearShifter
+
+    # 挡位白名单：D挡/N挡/S挡 (排除 P/R)
+    is_gear_valid = (gear not in [car.CarState.GearShifter.reverse, car.CarState.GearShifter.park])
+
+    # 功能激活条件
+    is_active = self.lead_start_enabled and lead.status and is_gear_valid
+
+    if is_active:
+      # --- B. 变量提取与阈值定义 ---
+      d_rel = lead.dRel
+      v_lead = lead.vLead
+
+      # 阈值设定 - 使用配置参数
+      STOP_SPEED_LIMIT = 0.5       # 低于此速度视为静止
+      START_SPEED_LIMIT = self.lead_start_threshold # 使用配置的起步速度阈值
+      MIN_STOP_TIME = self.lead_stop_threshold  # 使用配置的停止时间阈值
+      ALERT_COOLDOWN = 5.0         # 提醒冷却时间（改回5秒）
+      WAKE_DISTANCE_DELTA = 0.8    # 【关键】前车必须远离至少0.8米才触发，防蠕行
+
+      # --- C. 核心状态机 ---
+      # C-1. 判定静止状态
+      # 只有当速度很低，且距离在合理范围内（2-50米）
+      if v_lead < STOP_SPEED_LIMIT and 2.0 < d_rel < 50.0:
         if not self.lead_was_stopped:
           self.lead_stopped_time = current_time
+          self.lead_min_dist_during_stop = d_rel # 记录停下瞬间的距离
+        else:
+          # 持续静止中：不断更新最小距离（防止前车倒溜或雷达波动导致的距离误判）
+          if d_rel < self.lead_min_dist_during_stop:
+            self.lead_min_dist_during_stop = d_rel
+
         self.lead_was_stopped = True
-        self.lead_started = False
+        # 静止时不提醒
         self.lead_start_alert = False
         self.lead_start_alert_duration = 0
-      # 检测前车起步状态
-      elif self.lead_was_stopped and not self.lead_started and \
-           lead.vLead > self.lead_start_threshold and \
-           v_ego < 0.5 and \
-           (current_time - self.lead_stopped_time) > self.lead_stop_threshold and \
-           lead.dRel < 30.0:
-            # 触发前车起步提醒
-            self.lead_started = True
-            self.lead_start_alert = True
-            self.lead_start_alert_duration = 40  # 持续2秒 (假设20Hz)
-            # 额外的日志记录用于调试
-            cloudlog.info(f"Lead start alert triggered: lead speed={lead.vLead:.2f} m/s, lead distance={lead.dRel:.1f} m")
-      else:
-        # 其他情况：递减提醒持续时间
-        if self.lead_start_alert_duration > 0:
-          self.lead_start_alert_duration -= 1
+
+      # C-2. 判定起步状态
+      # 前提：之前必须是停稳的
+      elif self.lead_was_stopped:
+        # 计算关键指标
+        time_stopped = current_time - self.lead_stopped_time
+        # 关键：使用初始停止距离计算实际移动距离，避免停止期间距离波动影响
+        initial_stop_distance = self.lead_min_dist_during_stop
+        dist_moved = d_rel - initial_stop_distance
+        time_since_last_alert = current_time - self.last_lead_start_time
+
+        # 触发起步的条件组合：
+        # 1. 停得够久 (不是急刹急起)
+        # 2. 本车还在停着 (v_ego < 0.2)
+        # 3. 前车速度达标 (v_lead > 阈值)
+        # 4. 【核心】前车已经发生实质性位移 (dist_moved > 0.8米)，这能过滤掉绝大多数红绿灯路口的蠕行
+        # 5. 冷却时间已过
+
+        is_real_start = (time_stopped > MIN_STOP_TIME and
+                         v_ego < 0.2 and
+                         v_lead > START_SPEED_LIMIT and
+                         dist_moved > WAKE_DISTANCE_DELTA and
+                         time_since_last_alert > ALERT_COOLDOWN)
+
+        if is_real_start:
+          # >>> 确认起步，触发提醒 <<<
           self.lead_start_alert = True
-        else:
-          self.lead_start_alert = False
-        # 注意：不要在这里重置 lead_was_stopped！
-        # 只有当前车重新停止或丢失时才重置
+          self.lead_start_alert_duration = 50 # 2.5秒 (20Hz)
+          self.last_lead_start_time = current_time
+
+          # 记录起步时间，用于状态转换缓冲
+          self.lead_started_time = current_time
+          cloudlog.info(f"Lead Start Alert: Moved {dist_moved:.2f}m, Speed {v_lead:.2f}")
+
+        # 只有当本车开始移动时，才重置状态，避免逻辑竞争
+        elif v_ego > 0.3:
+           self.lead_was_stopped = False
+
+      # C-3. 异常状态保护
+      else:
+        # 既不是静止，也不是起步（比如正常跟车行驶中）
+        # 多种情况需要重置状态：
+        # 1. 本车开始移动 (v_ego > 0.3)
+        # 2. 前车距离过远 (d_rel > 60.0)
+        # 3. 起步后经过一段时间 (如果有起步记录)
+        if v_ego > 0.3 or d_rel > 60.0:
+           self.lead_was_stopped = False
+
     else:
-      # 功能未启用或未检测到前车
-      self.lead_started = False
-      self.lead_start_alert = False
+      # --- D. 功能关闭或无效状态 ---
       self.lead_was_stopped = False
-      self.lead_stopped_time = float('inf')  # 添加这行
+      self.lead_stopped_time = 0.0
+      self.lead_min_dist_during_stop = 0.0 # 重置距离记录
+      self.lead_start_alert = False
       self.lead_start_alert_duration = 0
+      self.lead_started_time = 0.0
+
+    # --- E. 统一的 UI 维持逻辑 ---
+    # 只要有剩余时长，就强制维持 True，保证声音/图标完整
+    if self.lead_start_alert_duration > 0:
+      self.lead_start_alert_duration -= 1
+      self.lead_start_alert = True
+    elif is_active and not self.lead_start_alert:
+       # 未触发状态，保持 False
+       pass
+    else:
+       self.lead_start_alert = False
 
   def publish(self, sm, pm):
     plan_send = messaging.new_message('longitudinalPlan')
